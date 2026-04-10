@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.venv/
+venv/
+env/
+
+# Generated assets (don't commit binary output)
+assets/*.png
+!assets/.gitkeep
+sprite-me-assets.json
+
+# Environment
+.env
+.env.local
+
+# Local Claude Code settings (contains permission allowlist with secrets)
+.claude/
+
+# Generated smoke-test output
+test_output.png
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# uv
+.uv/
+uv.lock

@@ -1,0 +1,23 @@
+{
+  "prompt": {
+    "1": {
+      "class_type": "LoadImageBase64",
+      "inputs": {
+        "image": ""
+      }
+    },
+    "2": {
+      "class_type": "Image Remove Background (rembg)",
+      "inputs": {
+        "image": ["1", 0]
+      }
+    },
+    "3": {
+      "class_type": "SaveImage",
+      "inputs": {
+        "images": ["2", 0],
+        "filename_prefix": "sprite-me-nobg"
+      }
+    }
+  }
+}
