@@ -26,7 +26,12 @@ sprite-me-assets.json
 
 # Generated smoke-test output
 test_output*.png
+test_alpha*.png
+test_thin*.png
+test_v*_volume*.png
 anim_test*.png
+hero*.png
+walk*.png
 
 # IDE
 .vscode/
