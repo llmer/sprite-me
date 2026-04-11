@@ -204,6 +204,32 @@ consistency you'll need to re-pixelate each frame externally.
 sword and you ask for "one hand raised", Kontext produces weird hand
 geometry. Animations work best when the limb topology stays constant.
 
+## Hero design guidelines (for best animation quality)
+
+The hero's starting pose determines what animations are viable. Kontext
+preserves character identity but only shifts existing body parts — it
+can't add new ones. Match the hero's visible limbs to the animation's
+requirements:
+
+| Animation | Hero requirements |
+|---|---|
+| walk / run | Legs fully visible, neutral standing pose, not seated/cropped |
+| attack | Weapon hand must be free; two-handed weapons limit you to overhead/both-hand swings |
+| jump | Both legs visible, not hidden under a cape or robe |
+| cast | At least one hand visible and free; a two-handed weapon prevents casting |
+| death | Full body visible; death is a whole-body collapse |
+
+When generating a hero specifically for animation, prompt in the target
+pose rather than generically. `"standing knight facing forward, legs
+apart, longsword in right hand"` produces a walk-cycle-friendly hero.
+Just `"knight"` can produce anything from a headshot portrait to a
+two-handed sword-raised pose, which may not animate into the shape
+you want.
+
+For **weapon continuity**, remember that Kontext preserves the weapon
+type across frames. You can't swap weapons during an animation. Generate
+a separate hero if the animation needs a different weapon.
+
 **No multi-character scenes.** Kontext works on one subject at a time.
 Two interacting characters would need a different approach.
 

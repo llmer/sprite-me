@@ -10,6 +10,7 @@ from sprite_me.inference.runpod_client import RunPodClient
 from sprite_me.inference.workflow_builder import build_generate_workflow
 from sprite_me.processing.background import remove_background
 from sprite_me.processing.crop import smart_crop
+from sprite_me.processing.palette import pixelate as pixelate_image
 from sprite_me.storage.local import LocalStorage
 from sprite_me.storage.manifest import Asset, AssetManifest
 
@@ -24,12 +25,27 @@ async def generate_sprite(
     lora_strength: float | None = None,
     smart_crop_mode: str | None = None,
     remove_bg: bool = True,
+    pixelate: bool = False,
+    pixel_size: int = 64,
+    palette_size: int = 16,
     reference_asset_id: str | None = None,
     runpod: RunPodClient | None = None,
     storage: LocalStorage | None = None,
     manifest: AssetManifest | None = None,
 ) -> dict[str, Any]:
     """Generate a pixel art sprite from a text prompt.
+
+    Args:
+        prompt: Subject description
+        pixelate: If True, apply a retro pixelation pass after background
+            removal. Downsamples to `pixel_size` and quantizes to
+            `palette_size` colors, then upsamples back to the original
+            dimensions with nearest-neighbor. Gives sprite-me outputs a
+            crisp classic-game look instead of the smooth FLUX default.
+        pixel_size: Target pixel resolution (e.g., 64 for a classic 64×64
+            sprite, 32 for Game Boy, 16 for tile). Only used if pixelate=True.
+        palette_size: Max colors in the output palette. 16 is standard
+            retro; 8 is Game Boy; 32 is modern pixel art.
 
     Returns a dict with asset_id, filename, path, and metadata.
     """
@@ -70,6 +86,14 @@ async def generate_sprite(
 
     if remove_bg:
         image_data = remove_background(image_data)
+
+    if pixelate:
+        image_data = pixelate_image(
+            image_data,
+            target_size=pixel_size,
+            palette_size=palette_size,
+            upscale=True,
+        )
 
     # Save to storage
     asset = Asset(

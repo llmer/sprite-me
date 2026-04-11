@@ -79,6 +79,24 @@ These are usable as **keyframes for game engines** (Godot, Unity, Phaser) after 
 
 Kontext operates at 1024×1024 internally regardless of the hero's original size. Your 512×512 hero will be upscaled by `FluxKontextImageScale` before generation. If you need 512×512 output for your game engine, run each frame through sprite-me's post-processing (which does smart-crop + background removal) or resize externally.
 
+## Retro pixel-art output
+
+Kontext produces smooth painterly frames by default. For classic-game sprite aesthetics, set `pixelate=True` on `animate_sprite`:
+
+```python
+animate_sprite(
+    asset_id=hero_id,
+    animation="walk",
+    pixelate=True,
+    pixel_size=64,      # 64 classic, 32 Game Boy, 16 tile
+    palette_size=16,    # 16 classic NES/SNES, 8 Game Boy, 32 modern retro
+)
+```
+
+Each frame runs through a downsample → color-quantize → nearest-neighbor upsample pipeline after background removal. The result: crisp blocky pixels with a limited palette, ready for a retro game engine. Character identity is preserved (the pixel version is the same knight, just blocky). Use this whenever the hero was generated with `pixelate=True` OR the user's project is explicitly pixel-art style.
+
+For best results the hero should be generated with `pixelate=True` too, so the hero and the animation share the same palette and grid resolution.
+
 ## Timing and cost
 
 - First frame on a cold endpoint: ~2-5 minutes (cold start dominated)
@@ -98,6 +116,22 @@ Don't parallelize frame submissions. Sequential per-frame is more reliable and e
 4. **Seed matters**: same seed across frames helps consistency. Different seeds per frame give more variation. The tool uses the same seed for all frames in a single call; change `seed` between calls if you want variety.
 
 5. **Animations won't magically have hands — Kontext can't add or remove limbs reliably**: if your hero has a two-handed sword, asking for "one hand raised" may produce weird hand geometry. Start with hero poses that have the limbs you'll need for the animation.
+
+## Hero design rules (this matters more than anything else)
+
+Kontext's character preservation is strong but not magical. It can change pose; it can't change body topology. The best animations come from heroes whose starting pose matches the limb usage of the target animation:
+
+- **Walk/run cycle**: hero must have clearly visible legs in a neutral standing pose. If the hero is cropped at the waist or sitting, walk cycles will look broken.
+- **Attack**: hero must have the weapon hand free and visible. A hero holding a weapon with both hands can still do an overhead swing but NOT a one-handed slash.
+- **Jump**: hero needs both legs visible and not obstructed by a cape/robe flowing over them.
+- **Cast**: hero needs at least one hand visible and free (not holding a weapon with both hands).
+- **Death**: hero needs a full body — death animations show collapse, which requires showing the whole body falling. A bust/portrait hero can't do death.
+
+**When in doubt, generate the hero with the animation in mind.** If the user asks for a walk cycle, prompt `generate_sprite` with `"standing knight facing forward, legs apart, longsword held in right hand"` rather than `"knight"`. The resulting hero will animate much better because its starting pose already supports the transformations Kontext needs to make.
+
+**Limb-count rule**: Kontext can SHIFT existing limbs but struggles to ADD new ones. If the hero has two hands on a sword, a "one hand raised" pose will produce awkward hand geometry. Generate the hero in the hand-configuration you'll need most often in the animation.
+
+**Weapon continuity**: the hero's weapon type must stay the same across frames (Kontext preserves it). You can't turn a longsword into a bow mid-animation.
 
 ## What animate_sprite does NOT do
 

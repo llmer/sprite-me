@@ -39,6 +39,9 @@ class GenerateRequest(BaseModel):
     lora_strength: float = 0.85
     smart_crop_mode: str = "tightest"
     remove_bg: bool = True
+    pixelate: bool = False
+    pixel_size: int = 64
+    palette_size: int = 16
     reference_asset_id: str | None = None
 
 
@@ -50,6 +53,9 @@ class AnimateRequest(BaseModel):
     edge_margin: int = 6
     auto_enhance: bool = True
     seed: int | None = None
+    pixelate: bool = False
+    pixel_size: int = 64
+    palette_size: int = 16
 
 
 class ImportRequest(BaseModel):
@@ -99,6 +105,9 @@ async def api_generate(req: GenerateRequest) -> dict[str, Any]:
         lora_strength=req.lora_strength,
         smart_crop_mode=req.smart_crop_mode,
         remove_bg=req.remove_bg,
+        pixelate=req.pixelate,
+        pixel_size=req.pixel_size,
+        palette_size=req.palette_size,
         reference_asset_id=req.reference_asset_id,
         runpod=_runpod,
         storage=_storage,
@@ -116,6 +125,9 @@ async def api_animate(req: AnimateRequest) -> dict[str, Any]:
         edge_margin=req.edge_margin,
         auto_enhance=req.auto_enhance,
         seed=req.seed,
+        pixelate=req.pixelate,
+        pixel_size=req.pixel_size,
+        palette_size=req.palette_size,
         runpod=_runpod,
         storage=_storage,
         manifest=_manifest,

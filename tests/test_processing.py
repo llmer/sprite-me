@@ -5,7 +5,7 @@ from io import BytesIO
 from PIL import Image
 
 from sprite_me.processing.crop import smart_crop
-from sprite_me.processing.palette import reduce_palette, snap_to_grid
+from sprite_me.processing.palette import pixelate, reduce_palette, snap_to_grid
 from sprite_me.processing.spritesheet import assemble_spritesheet, split_spritesheet
 
 
@@ -68,6 +68,92 @@ def test_snap_to_grid_preserves_dimensions():
     snapped = snap_to_grid(original, grid_size=2)
     img = Image.open(BytesIO(snapped))
     assert img.size == (64, 64)
+
+
+def _make_smooth_gradient(size: int = 256) -> bytes:
+    """Create a smooth RGB gradient — simulates a 'painterly' Kontext output."""
+    img = Image.new("RGBA", (size, size))
+    for y in range(size):
+        for x in range(size):
+            # Smooth gradient blend red→blue horizontally, green intensity vertically
+            r = int(255 * (1 - x / size))
+            g = int(255 * (y / size))
+            b = int(255 * (x / size))
+            img.putpixel((x, y), (r, g, b, 255))
+    buf = BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def test_pixelate_upscales_back_to_original_dimensions():
+    original = _make_smooth_gradient(256)
+    pixelated = pixelate(original, target_size=64, palette_size=16, upscale=True)
+    img = Image.open(BytesIO(pixelated))
+    # Upscaled output matches the longest side of the original
+    assert img.size == (256, 256)
+
+
+def test_pixelate_raw_size_when_upscale_false():
+    original = _make_smooth_gradient(256)
+    raw = pixelate(original, target_size=64, palette_size=16, upscale=False)
+    img = Image.open(BytesIO(raw))
+    assert img.size == (64, 64)
+
+
+def test_pixelate_limits_palette():
+    original = _make_smooth_gradient(128)
+    pixelated = pixelate(original, target_size=32, palette_size=8, upscale=False)
+    img = Image.open(BytesIO(pixelated)).convert("RGB")
+    colors = set(img.getdata())
+    assert len(colors) <= 8
+
+
+def test_pixelate_produces_sharp_blocks_after_upscale():
+    """After pixelate+upscale, adjacent pixel rows within a 'block' should be identical.
+
+    A real nearest-neighbor upscale of a 64→256 image produces 4×4 blocks of
+    identical pixels. If pixelate is using a smooth filter by mistake, neighbors
+    inside a block will differ.
+    """
+    original = _make_smooth_gradient(256)
+    pixelated = pixelate(original, target_size=64, palette_size=16, upscale=True)
+    img = Image.open(BytesIO(pixelated)).convert("RGB")
+    w, h = img.size
+    scale = w // 64  # should be 4
+
+    # Sample a few block positions and verify within-block uniformity
+    block_uniform_count = 0
+    for block_x in [5, 20, 40]:
+        for block_y in [5, 20, 40]:
+            corner = (block_x * scale, block_y * scale)
+            corner_pixel = img.getpixel(corner)
+            # Check a sibling pixel within the same block
+            sibling = (corner[0] + 1, corner[1] + 1)
+            if img.getpixel(sibling) == corner_pixel:
+                block_uniform_count += 1
+    # Most sampled blocks should have uniform pixels (some may straddle edges)
+    assert block_uniform_count >= 7
+
+
+def test_pixelate_preserves_alpha():
+    """Transparent background pixels must stay transparent after pixelation."""
+    img = Image.new("RGBA", (128, 128), (0, 0, 0, 0))
+    # Draw a red square in the middle
+    for y in range(40, 88):
+        for x in range(40, 88):
+            img.putpixel((x, y), (255, 0, 0, 255))
+    buf = BytesIO()
+    img.save(buf, format="PNG")
+    original = buf.getvalue()
+
+    pixelated = pixelate(original, target_size=32, palette_size=4, upscale=False)
+    out = Image.open(BytesIO(pixelated)).convert("RGBA")
+    # Corner should still be transparent
+    assert out.getpixel((0, 0))[3] < 128  # alpha near 0
+    # Center should still be opaque red-ish
+    center = out.getpixel((16, 16))
+    assert center[3] > 200  # alpha near 255
+    assert center[0] > 200  # red channel high
 
 
 def test_assemble_spritesheet_creates_grid():

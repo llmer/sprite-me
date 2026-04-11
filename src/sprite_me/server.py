@@ -68,6 +68,9 @@ async def generate_sprite(
     lora_strength: float = 0.85,
     smart_crop_mode: str = "tightest",
     remove_bg: bool = True,
+    pixelate: bool = False,
+    pixel_size: int = 64,
+    palette_size: int = 16,
     reference_asset_id: str | None = None,
 ) -> dict[str, Any]:
     """Generate a pixel art sprite from a text prompt.
@@ -85,6 +88,12 @@ async def generate_sprite(
         lora_strength: How strongly the game-asset LoRA influences output (0-1).
         smart_crop_mode: "tightest" or "padded".
         remove_bg: If true, output transparent background.
+        pixelate: If true, apply a retro pixelation pass after background removal.
+            Turns the smooth FLUX output into a crisp classic-game pixel sprite.
+        pixel_size: Target pixel resolution when pixelate=True (64 classic,
+            32 Game Boy, 16 tile).
+        palette_size: Max colors in the palette when pixelate=True (16 classic,
+            8 Game Boy, 32 modern retro).
         reference_asset_id: Use this asset's prompt as a style reference.
 
     Returns:
@@ -101,6 +110,9 @@ async def generate_sprite(
         lora_strength=lora_strength,
         smart_crop_mode=smart_crop_mode,
         remove_bg=remove_bg,
+        pixelate=pixelate,
+        pixel_size=pixel_size,
+        palette_size=palette_size,
         reference_asset_id=reference_asset_id,
         runpod=runpod,
         storage=storage,
@@ -117,6 +129,9 @@ async def animate_sprite(
     edge_margin: int = 6,
     auto_enhance: bool = True,
     seed: int | None = None,
+    pixelate: bool = False,
+    pixel_size: int = 64,
+    palette_size: int = 16,
 ) -> dict[str, Any]:
     """Generate an animated sprite sheet from an existing sprite asset.
 
@@ -131,6 +146,11 @@ async def animate_sprite(
         edge_margin: Pixel margin around each frame (default 6).
         auto_enhance: Expand simple prompts into detailed motion descriptions.
         seed: Random seed for reproducibility.
+        pixelate: If true, apply retro pixelation to each frame. Kontext
+            produces smooth 1024x1024 painterly art; enabling this gives you
+            crisp classic-game sprites ready for retro engines.
+        pixel_size: Target pixel resolution per frame (64 classic, 32 Game Boy).
+        palette_size: Max colors per frame (16 classic, 8 Game Boy).
 
     Returns:
         Dict with asset_id, filename, path, animation, frames, source_asset_id.
@@ -144,6 +164,9 @@ async def animate_sprite(
         edge_margin=edge_margin,
         auto_enhance=auto_enhance,
         seed=seed,
+        pixelate=pixelate,
+        pixel_size=pixel_size,
+        palette_size=palette_size,
         runpod=runpod,
         storage=storage,
         manifest=manifest,

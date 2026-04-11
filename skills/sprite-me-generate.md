@@ -85,3 +85,18 @@ Lower strength if the output looks too stylized/blocky. Raise it if the output l
 - Pass `seed` to reproduce the exact same sprite
 - Leave `seed=None` for variety
 - For a set of variations (3 different swords), use different seeds with the same prompt + reference asset
+
+## Retro pixel-art mode
+
+FLUX outputs smooth-shaded art by default. If you want **actual classic-game pixel sprites** (hard blocky pixels, 16-color palette, Game Boy aesthetic) set `pixelate=True` when calling `generate_sprite`.
+
+```python
+generate_sprite(
+    prompt="warrior with longsword and shield",
+    pixelate=True,
+    pixel_size=64,       # 64x64 classic sprite. Try 32 for Game Boy, 16 for tiles.
+    palette_size=16,     # 16 colors = classic NES/SNES. 8 = Game Boy. 32 = modern retro.
+)
+```
+
+The pixelation runs after background removal, so the output is still a transparent-background sprite — just with crisp pixel blocks instead of smooth edges. Character identity and overall composition are preserved (it's a downsample, not a re-generation). Enable this when the user explicitly wants the retro aesthetic, the project is a pixel-art game, or the prompt includes words like "pixel art", "retro", "8-bit", "16-bit", "Game Boy".

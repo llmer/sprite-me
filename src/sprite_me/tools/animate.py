@@ -34,6 +34,7 @@ from sprite_me.inference.runpod_client import RunPodClient, RunPodError
 from sprite_me.inference.workflow_builder import build_animate_workflow
 from sprite_me.processing.background import remove_background
 from sprite_me.processing.crop import smart_crop
+from sprite_me.processing.palette import pixelate as pixelate_image
 from sprite_me.processing.spritesheet import assemble_spritesheet
 from sprite_me.storage.local import LocalStorage
 from sprite_me.storage.manifest import Asset, AssetManifest
@@ -131,6 +132,9 @@ async def animate_sprite(
     seed: int | None = None,
     steps: int = 20,
     guidance: float = 2.5,
+    pixelate: bool = False,
+    pixel_size: int = 64,
+    palette_size: int = 16,
     runpod: RunPodClient | None = None,
     storage: LocalStorage | None = None,
     manifest: AssetManifest | None = None,
@@ -156,6 +160,12 @@ async def animate_sprite(
             better consistency)
         steps: Kontext sampling steps, default 20
         guidance: FluxGuidance scale, default 2.5 (Kontext canonical value)
+        pixelate: If True, apply retro pixelation to each frame. Kontext
+            outputs smooth 1024x1024 painterly art; enabling this turns each
+            frame into a crisp pixel-art sprite at `pixel_size` resolution
+            with `palette_size` colors. Useful for retro game projects.
+        pixel_size: Pixelation target (classic 64, Game Boy 32, tile 16)
+        palette_size: Pixelation palette colors (classic 16, Game Boy 8)
 
     Returns a dict with asset_id, filename, path, animation, frames,
     source_asset_id, seed. On failure: dict with "error" key.
@@ -205,14 +215,21 @@ async def animate_sprite(
     if not raw_frames:
         return {"error": "All frames failed to generate"}
 
-    # Post-process: smart_crop to tighten bounds, then remove_background.
-    # Padded mode for animation so arms/weapons don't get clipped when they
-    # swing outside the static-frame bounds.
+    # Post-process: smart_crop to tighten bounds, then remove_background,
+    # then optional pixelation. Padded crop mode for animation so arms/
+    # weapons don't get clipped when they swing outside the static bounds.
     processed_frames: list[bytes] = []
     for frame in raw_frames:
         try:
             frame = smart_crop(frame, mode="padded", margin=actual_margin)
             frame = remove_background(frame)
+            if pixelate:
+                frame = pixelate_image(
+                    frame,
+                    target_size=pixel_size,
+                    palette_size=palette_size,
+                    upscale=True,
+                )
         except Exception as e:
             logger.warning("Post-processing failed on a frame: %s", e)
         processed_frames.append(frame)
