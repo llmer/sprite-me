@@ -93,115 +93,127 @@ def build_generate_workflow(
 
 
 def build_animate_workflow(
-    reference_image_b64: str,
-    animation_prompt: str,
-    frames: int = 6,
-    width: int = 512,
-    height: int = 512,
+    pose_prompt: str,
+    reference_image_name: str = "hero.png",
+    width: int = 1024,
+    height: int = 1024,
     seed: int = 0,
     steps: int = 20,
-    guidance: float = 3.5,
-    lora_strength: float = 0.85,
-    lora_trigger: str = "GRPZA",
-    edge_margin: int = 6,
+    guidance: float = 2.5,
 ) -> dict[str, Any]:
-    """Build a FLUX animation workflow that generates N frame candidates.
+    """Build a FLUX.1 Kontext single-frame animation workflow.
 
-    EXPERIMENTAL — the current approach uses `batch_size=N` on a single
-    `EmptySD3LatentImage`, which gives N independent same-prompt variations.
-    Each candidate is a full centered character sprite (not a strip), so
-    you can use them as idle-breathing variations or as a starting point
-    for hand-selecting frames.
+    Takes a reference image (hero sprite) + a pose-change prompt and returns
+    a ComfyUI node graph that produces one frame showing the same character
+    in the requested pose. Character identity, art style, and palette flow
+    from the reference image via Kontext's ReferenceLatent mechanism — no
+    LoRA load needed, no manual style prompting, no pose skeleton.
 
-    This is NOT a proper animation cycle: there is no pose control and no
-    inter-frame coherence. For real walk/attack cycles you'd want either:
-      - IP-Adapter / reference_image conditioning + explicit per-frame
-        pose prompts (would require additional custom nodes in the image)
-      - Sprite Sheet Diffusion (arxiv 2412.03685) — needs a custom model
-      - Per-frame generation with ControlNet OpenPose
+    Topology mirrored from the canonical nunchaku Kontext example:
+        UNETLoader(flux1-dev-kontext_fp8_scaled)
+            → KSampler.model
+        DualCLIPLoader(clip_l, t5xxl_fp8_e4m3fn_scaled, type=flux)
+            → CLIPTextEncode(pose_prompt) → ReferenceLatent(ref_latent) → FluxGuidance(2.5) → KSampler.positive
+                                            ↑
+        VAELoader(ae.safetensors)
+            → VAEEncode → ref_latent
+                          ↑              → KSampler.latent_image (same latent; denoise=1 but ref conditioning steers sampling)
+            → VAEDecode(final samples)
+        LoadImage(reference_image_name) → FluxKontextImageScale → pixels → VAEEncode
+        CLIPTextEncode → ConditioningZeroOut → KSampler.negative
+        KSampler → VAEDecode → SaveImage
 
-    A previous attempt rendered frames side-by-side in a single wide
-    latent (width * N × height). That produced visually interesting output
-    but the characters drifted in position and weren't frame-aligned, so
-    the sprite sheet couldn't be sliced cleanly. batch_size is strictly
-    better for this use case.
+    The hero PNG must be uploaded as an "images" entry in the /run payload
+    so the runpod handler writes it to /comfyui/input/ before ComfyUI starts
+    the workflow.
+
+    KSampler config is FIXED for Kontext: cfg=1, scheduler=simple, denoise=1.
+    Callers parameterize seed, steps (default 20), guidance (default 2.5).
 
     Args:
-        reference_image_b64: Currently unused (reserved for future IP-Adapter
-            integration). Pass "" for now.
-        animation_prompt: Describes the desired animation / motion.
-        frames: Number of candidate frames to generate in one batch (=N).
-        width, height: Per-frame dimensions (each frame is a full image).
-        seed: Base seed. All frames share this seed so their random
-            variation comes from the batch index, not fresh RNG.
+        pose_prompt: Kontext-style edit instruction. Best form:
+            "Change the pose to <new pose>. Keep the exact same character,
+             clothing, palette, and art style unchanged."
+        reference_image_name: Filename the handler will write the hero to
+            in /comfyui/input/. Default "hero.png" — only change if you're
+            running multiple concurrent animations on the same worker.
+        width, height: Output dimensions. Kontext works best at 1024x1024
+            (FluxKontextImageScale auto-scales the reference to this).
+        seed: KSampler seed. Same seed across frames improves consistency.
+        steps: Sampling steps. 20 is the canonical default for Kontext.
+        guidance: FluxGuidance scale. 2.5 is the nunchaku default; range 1.5-4.0.
     """
     return {
         "1": {
-            "class_type": "CheckpointLoaderSimple",
-            "inputs": {"ckpt_name": "flux1-dev-fp8.safetensors"},
+            "class_type": "UNETLoader",
+            "inputs": {
+                "unet_name": "flux1-dev-kontext_fp8_scaled.safetensors",
+                "weight_dtype": "default",
+            },
         },
         "2": {
-            "class_type": "LoraLoader",
+            "class_type": "DualCLIPLoader",
             "inputs": {
-                "lora_name": "flux-2d-game-assets.safetensors",
-                "strength_model": lora_strength,
-                "strength_clip": lora_strength,
-                "model": ["1", 0],
-                "clip": ["1", 1],
+                "clip_name1": "clip_l.safetensors",
+                "clip_name2": "t5xxl_fp8_e4m3fn_scaled.safetensors",
+                "type": "flux",
+                "device": "default",
             },
         },
         "3": {
-            "class_type": "CLIPTextEncode",
-            "inputs": {
-                # HF model card order: GRPZA, <prompt>, white background, game asset.
-                "text": f"{lora_trigger}, {animation_prompt}, centered character, white background, game asset",
-                "clip": ["2", 1],
-            },
+            "class_type": "VAELoader",
+            "inputs": {"vae_name": "ae.safetensors"},
         },
         "4": {
-            "class_type": "CLIPTextEncode",
-            "inputs": {
-                "text": "blurry, low quality, watermark, text, realistic, photograph, 3d render",
-                "clip": ["2", 1],
-            },
+            "class_type": "LoadImage",
+            "inputs": {"image": reference_image_name},
         },
         "5": {
-            "class_type": "EmptySD3LatentImage",
-            "inputs": {
-                "width": width,
-                "height": height,
-                "batch_size": frames,
-            },
+            "class_type": "FluxKontextImageScale",
+            "inputs": {"image": ["4", 0]},
+        },
+        "6": {
+            "class_type": "VAEEncode",
+            "inputs": {"pixels": ["5", 0], "vae": ["3", 0]},
+        },
+        "7": {
+            "class_type": "CLIPTextEncode",
+            "inputs": {"text": pose_prompt, "clip": ["2", 0]},
+        },
+        "8": {
+            "class_type": "ReferenceLatent",
+            "inputs": {"conditioning": ["7", 0], "latent": ["6", 0]},
         },
         "9": {
             "class_type": "FluxGuidance",
-            "inputs": {
-                "guidance": guidance,
-                "conditioning": ["3", 0],
-            },
+            "inputs": {"conditioning": ["8", 0], "guidance": guidance},
         },
-        "6": {
+        "10": {
+            "class_type": "ConditioningZeroOut",
+            "inputs": {"conditioning": ["7", 0]},
+        },
+        "11": {
             "class_type": "KSampler",
             "inputs": {
-                "model": ["2", 0],
-                "positive": ["9", 0],
-                "negative": ["4", 0],
-                "latent_image": ["5", 0],
                 "seed": seed,
                 "steps": steps,
                 "cfg": 1.0,
                 "sampler_name": "euler",
                 "scheduler": "simple",
                 "denoise": 1.0,
+                "model": ["1", 0],
+                "positive": ["9", 0],
+                "negative": ["10", 0],
+                "latent_image": ["6", 0],
             },
         },
-        "7": {
+        "12": {
             "class_type": "VAEDecode",
-            "inputs": {"samples": ["6", 0], "vae": ["1", 2]},
+            "inputs": {"samples": ["11", 0], "vae": ["3", 0]},
         },
-        "8": {
+        "13": {
             "class_type": "SaveImage",
-            "inputs": {"images": ["7", 0], "filename_prefix": "sprite-me-anim"},
+            "inputs": {"images": ["12", 0], "filename_prefix": "sprite-me-kontext"},
         },
     }
 

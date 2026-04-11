@@ -32,6 +32,8 @@ test_v*_volume*.png
 anim_test*.png
 hero*.png
 walk*.png
+fresh_hero*.png
+kontext_*.png
 
 # IDE
 .vscode/

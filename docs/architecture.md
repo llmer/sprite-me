@@ -59,32 +59,46 @@ sprite-me is an open-source, self-hosted alternative to [SpriteCook](https://www
 ┌──────────────────▼──────────────────────────────┐
 │  ComfyUI Workers on RunPod Serverless            │
 │                                                  │
-│  Slim Docker image (no models baked in):         │
-│    runpod/worker-comfyui-flux1-dev +             │
-│    rembg custom node +                           │
-│    entrypoint.sh (symlinks volume models)        │
+│  Docker image (~23 GB):                          │
+│    runpod/worker-comfyui:5.8.5-flux1-dev-fp8 +   │
+│    extra_model_paths.yaml (reads volume models)  │
 │                                                  │
-│  Auto-scaling: 0 -> N workers on demand          │
-│  GPU: NVIDIA 3090/4090 (~$0.22-0.40/hr)         │
+│  Auto-scaling: 0 -> 5 workers on demand          │
+│  GPU: NVIDIA RTX 5090 (~$0.99/hr)                │
 └──────┬──────────────────────────────────────────┘
        │ mounted at /runpod-volume
        ▼
 ┌─────────────────────────────────────────────────┐
-│  RunPod Network Volumes (one per datacenter)    │
+│  RunPod Network Volume (EUR-NO-1, 50 GB)        │
 │                                                  │
 │  /runpod-volume/models/                          │
+│    ── generate flow (FLUX.1-dev fp8) ──          │
+│    checkpoints/flux1-dev-fp8.safetensors         │
 │    loras/flux-2d-game-assets.safetensors         │
-│    checkpoints/... (optional custom checkpoints) │
 │                                                  │
-│  Updated via S3 API:                             │
-│    scripts/sync_models.py sync ./models/loras    │
+│    ── animate flow (FLUX.1 Kontext fp8) ──       │
+│    diffusion_models/flux1-dev-kontext_fp8.safet  │
+│    text_encoders/clip_l.safetensors              │
+│    text_encoders/t5xxl_fp8_e4m3fn_scaled.safet   │
+│    vae/ae.safetensors                            │
 │                                                  │
-│  Managed via REST API:                           │
-│    sprite-me-volumes setup | list | teardown     │
+│  Updates via CPU pod + wget OR S3 API            │
+│  (scripts/sync_models.py)                        │
 └─────────────────────────────────────────────────┘
 ```
 
-**Why network volumes instead of baking models into the image?** Same reasoning as the `vid` project's `Infinitetalk_Runpod_hub`: keeps the Docker image small (~12 GB vs 25 GB+), lets you update LoRAs via `sync_models.py` without rebuilding and pushing a new image, and cold starts are faster because workers don't redownload models on every boot. The entrypoint symlinks the volume's model subdirs into ComfyUI's expected paths on startup.
+**Why network volumes + a fat base image?** Models are data, not code. Docker is optimized for small layered code deployments, not multi-gigabyte binary blobs. Storing model weights on a RunPod network volume lets us update models without rebuilding the image: code changes require zero infrastructure work, LoRA updates are a simple file sync, and only custom-node / entrypoint changes require a full rebuild. We keep the fat `runpod/worker-comfyui:5.8.5-flux1-dev-fp8` base (instead of the thin `5.8.5-base-cuda12.8.1`) because the base variant ships without `torch` or ComfyUI's Python dependencies — bolting them on manually wasn't worth the ~7 GB savings. The `extra_model_paths.yaml` baked into the image tells ComfyUI to scan `/runpod-volume/models/` alongside its default `/comfyui/models/` tree.
+
+## Two-model architecture (generate + animate)
+
+sprite-me runs **two separate FLUX checkpoints** for two different jobs:
+
+| Tool | Checkpoint | Purpose |
+|---|---|---|
+| `generate_sprite` | `flux1-dev-fp8.safetensors` (combined) + `flux-2d-game-assets.safetensors` LoRA | Create a new stylized game-asset sprite from a text prompt |
+| `animate_sprite` | `flux1-dev-kontext_fp8_scaled.safetensors` (split UNet) + separate text encoders + VAE, NO LoRA | Take an existing hero sprite and produce it in different poses |
+
+Both checkpoints live on the same network volume. Workers load whichever one the current workflow references via `UNETLoader` or `CheckpointLoaderSimple`. See `docs/animation.md` for the Kontext pipeline in detail.
 
 ## Key Design Decisions
 
