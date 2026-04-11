@@ -5,14 +5,14 @@
 # arbitrary namespace — ComfyUI merges all configured paths with its default
 # /comfyui/models/ tree.
 #
-# Each line maps a ComfyUI model type (checkpoints, loras, etc.) to a
-# subdirectory relative to base_path. Multiple model types can alias the
-# same physical directory (e.g. clip and text_encoders both read from
-# text_encoders/) because FLUX and SD conventions differ.
+# Valid keys taken from /comfyui/extra_model_paths.yaml.example in the
+# upstream runpod/worker-comfyui image. Do NOT add keys like `unet` or
+# `clip` at the top level — those were legacy directory names that are
+# now subsumed under `diffusion_models` and `text_encoders` respectively
+# via multiline string paths. Invalid keys may cause ComfyUI to fail
+# to start (no port 8188 bind).
 #
-# Seeding the volume: run scripts/sync_models.py OR wget directly from a
-# CPU pod attached to the volume. Expected layout:
-#
+# Expected volume layout:
 #   /runpod-volume/models/
 #     checkpoints/flux1-dev-fp8.safetensors
 #     diffusion_models/flux1-dev-kontext_fp8_scaled.safetensors
@@ -24,12 +24,16 @@
 sprite_me:
   base_path: /runpod-volume/models/
   checkpoints: checkpoints/
-  clip: text_encoders/
   clip_vision: clip_vision/
+  configs: configs/
   controlnet: controlnet/
-  diffusion_models: diffusion_models/
+  diffusion_models: |
+    diffusion_models/
+    unet/
   embeddings: embeddings/
   loras: loras/
-  text_encoders: text_encoders/
-  unet: diffusion_models/
+  text_encoders: |
+    text_encoders/
+    clip/
+  upscale_models: upscale_models/
   vae: vae/
