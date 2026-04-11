@@ -4,7 +4,7 @@
 
 Agent skills are markdown instruction files that teach AI coding agents *how* to use tools effectively. They encode best practices, default behaviors, and workflow patterns.
 
-This follows the [open Agent Skills standard](https://github.com/SpriteCook/skills) used by SpriteCook, compatible with:
+This follows the open Agent Skills standard, compatible with:
 - Cursor (`.cursor/skills/`)
 - VS Code + GitHub Copilot
 - Claude Code
@@ -42,29 +42,6 @@ Animation workflow guidance:
 - **Prompt enhancement**: Enable `auto_enhance=true` for simple presets like "idle" or "attack" — the system expands these into detailed motion descriptions
 - **Frame count guidance**: 4 frames for simple loops (idle), 6-8 for walk/run cycles, 8-12 for complex actions (attack, cast)
 - **Character-specific prompts**: Write motion prompts grounded in the character's context (e.g., "knight swinging greatsword" not just "attack")
-
-## How SpriteCook Does It (reference)
-
-From the [SpriteCook skills repo](https://github.com/SpriteCook/skills):
-
-**spritecook-workflow-essentials:**
-- Check available credits before large generation runs
-- Prefer presigned download URLs over direct downloads
-- Maintain local manifest of reusable `asset_id` values
-- Default to `smart_crop_mode="tightest"`
-- Default model: `gemini-3.1-flash-image-preview`
-
-**spritecook-generate-sprites:**
-- Generate production-ready pixel art or detailed/HD assets
-- Select appropriate mode, model, and crop settings
-- Maintain visual consistency using `reference_asset_id`
-- Apply `edit_asset_id` exclusively when modifying existing SpriteCook assets
-
-**spritecook-animate-assets:**
-- Import local images first, then animate by `asset_id`
-- Use `edge_margin=6` as default for safer framing
-- Write character-specific motion prompts grounded in context
-- Enable `auto_enhance_prompt=true` for simple prompts like "Idle" or "Attack"
 
 ## Installation
 

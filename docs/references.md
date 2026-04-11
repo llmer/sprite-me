@@ -1,18 +1,5 @@
 # References & Prior Art
 
-## SpriteCook (the inspiration)
-
-- **Website**: https://www.spritecook.ai/
-- **Agent integration docs**: https://www.spritecook.ai/agents
-- **FAQ**: https://www.spritecook.ai/docs/faq
-- **Skills repo**: https://github.com/SpriteCook/skills — 3 skills (essentials, generate, animate) following the open Agent Skills standard. MIT licensed.
-- **Cursor plugin**: https://github.com/SpriteCook/plugin — JavaScript plugin with MCP config, skill definitions, and Cursor commands.
-- **Blog post**: https://www.spritecook.ai/blog/ai-agent-generate-sprites — explains the agent workflow, hero-asset pattern, and MCP tool setup.
-- **MCP endpoint**: `https://api.spritecook.ai/mcp/` with Bearer token auth
-- **Import API**: `POST /v1/api/assets/import` for importing local PNGs before animation
-- **Default model**: `gemini-3.1-flash-image-preview` (their commercial backend)
-- **npm package**: https://www.npmjs.com/package/spritecook-mcp
-
 ## Image Generation Models
 
 ### FLUX
@@ -79,17 +66,6 @@ Patterns we adopted from `/Users/jim/src/vid/`:
   - Uses `@modelcontextprotocol/sdk`, `@gradio/client`, `@huggingface/inference`, `express`, `zod`, `sharp`
   - Tools: `generate_2d_asset`, `generate_3d_asset`
   - Resources: `asset://{type}/{filename}`
-
-## Commercial Competitors
-
-- **SpriteCook**: https://www.spritecook.ai/ — The primary inspiration. Agent-first, MCP-based.
-- **PixelLab**: https://www.pixellab.ai/ — AI pixel art generator with animation, skeleton-based controls.
-- **Scenario**: https://help.scenario.com/en/articles/create-spritesheets-with-scenario/ — AI sprite sheet generation with Flux, Seedance, Pixverse.
-- **AutoSprite**: https://www.autosprite.io/ — Upload one sprite, pick a moveset, export sprite sheets.
-- **Ludo.ai**: https://ludo.ai/features/sprite-generator — Game asset generation with API and MCP.
-- **Spritesheets.ai**: https://www.spritesheets.ai/ai-sprite-generator
-- **GodMode AI**: https://www.godmodeai.co/
-- **Segmind Pixelflow**: https://www.segmind.com/pixelflows/ai-sprite-sheet-maker
 
 ## Guides & Tutorials
 

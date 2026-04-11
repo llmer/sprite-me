@@ -1,6 +1,6 @@
 # sprite-me
 
-Agent-first pixel art sprite generator. An open-source, self-hosted alternative to [SpriteCook](https://www.spritecook.ai/) that lets AI coding agents (Claude Code, Cursor, Copilot, etc.) generate pixel art sprites and animations via MCP, with inference running on your own [RunPod](https://www.runpod.io/) GPUs.
+Agent-first pixel art sprite generator. An open-source, self-hosted tool that lets AI coding agents (Claude Code, Cursor, Copilot, etc.) generate pixel art sprites and animations via MCP, with inference running on your own [RunPod](https://www.runpod.io/) GPUs.
 
 ## What It Does
 

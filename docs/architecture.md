@@ -2,7 +2,7 @@
 
 ## Overview
 
-sprite-me is an open-source, self-hosted alternative to [SpriteCook](https://www.spritecook.ai/) with an agent-first design. AI coding agents (Claude Code, Cursor, Copilot, etc.) connect via MCP to generate pixel art sprites and animations, with inference running on your own RunPod GPUs.
+sprite-me is an open-source, self-hosted pixel art sprite generator with an agent-first design. AI coding agents (Claude Code, Cursor, Copilot, etc.) connect via MCP to generate pixel art sprites and animations, with inference running on your own RunPod GPUs.
 
 ## System Architecture
 
@@ -111,21 +111,16 @@ Both checkpoints live on the same network volume. Workers load whichever one the
 | Pixel art LoRA | Flux-2D-Game-Assets-LoRA | Specifically trained for game assets, clean white backgrounds, GRPZA trigger word |
 | Animation approach | Pose-conditioned multi-frame generation | Start simple (per-frame with seed pinning), upgrade path to Sprite Sheet Diffusion |
 | Storage | Local filesystem + JSON manifest | Simple, no external deps, easy to inspect and version control |
-| Style consistency | Hero-asset + reference_asset_id pattern | Same approach as SpriteCook — generate one asset, use it as style reference for the rest |
+| Style consistency | Hero-asset + reference_asset_id pattern | Generate one asset, use it as style reference for the rest |
 | Model distribution | RunPod network volumes, not Docker layers | Smaller images, faster cold starts, LoRA updates without image rebuilds (pattern from `vid/Infinitetalk_Runpod_hub`) |
 | Polling | Deadline-based with monotonic clock | Terminal states handled, time spent in each poll doesn't inflate budget (pattern from `vid/avatar_llmer/runpod.py`) |
 
-## How SpriteCook Works (for reference)
+## Three-layer pattern
 
-SpriteCook's architecture (from their [skills repo](https://github.com/SpriteCook/skills) and [agent docs](https://www.spritecook.ai/agents)) splits into three layers:
+The overall shape is a three-layer architecture:
 
-1. **MCP Server** at `https://api.spritecook.ai/mcp/` — exposes generation and animation tools
+1. **MCP Server** — exposes generation and animation tools to AI agents
 2. **Agent Skills** — markdown files that teach agents best practices (hero-asset-first, manifest tracking, crop defaults)
 3. **Backend API** — handles inference, post-processing, asset storage
 
-Their skills define three capabilities:
-- **spritecook-workflow-essentials** — core rules (check credits, use presigned URLs, maintain manifest, default `smart_crop_mode="tightest"`, default model `gemini-3.1-flash-image-preview`)
-- **spritecook-generate-sprites** — generation guidance (reference_asset_id for consistency, edit_asset_id for modifications)
-- **spritecook-animate-assets** — animation guidance (import first then animate by asset_id, edge_margin=6, auto_enhance_prompt=true)
-
-We replicate this three-layer pattern with open-source models and self-hosted inference.
+Built with open-source models and self-hosted inference on RunPod.

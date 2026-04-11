@@ -51,9 +51,8 @@
 - Cons: Based on SD 1.5 (lower quality), research code may not be production-ready
 
 **Approach C: Video diffusion models (experimental)**
-- Use models like Seedance, Pixverse, or Stable Video Diffusion to generate short character animation clips
+- Use models like Stable Video Diffusion to generate short character animation clips
 - Extract frames and convert to sprite sheet
-- Tools like AutoSprite (https://www.autosprite.io/) and Segmind Pixelflow (https://www.segmind.com/pixelflows/ai-sprite-sheet-maker) do this commercially
 
 ### 3. Background Removal
 
@@ -75,7 +74,7 @@
 
 ### 5. Style Consistency (no extra model needed)
 
-SpriteCook's pattern, which we replicate:
+The hero-asset pattern:
 1. Generate one "hero asset" first (the primary character/item)
 2. Use that asset's ID as `reference_asset_id` for all subsequent generations
 3. The system prepends the hero asset's prompt to new generation prompts
