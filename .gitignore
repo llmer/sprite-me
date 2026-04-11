@@ -25,7 +25,7 @@ sprite-me-assets.json
 .claude/
 
 # Generated smoke-test output
-test_output.png
+test_output*.png
 
 # IDE
 .vscode/
