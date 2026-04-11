@@ -1,25 +1,35 @@
-# sprite-me ComfyUI worker image.
+# sprite-me ComfyUI worker image — thin.
 #
-# Thin layer on top of the stock runpod/worker-comfyui image that bakes
-# the Flux-2D-Game-Assets LoRA at build time. No runtime downloads, no
-# entrypoint override — the base image's /start.sh handles everything.
+# Models are NOT baked into this image. They live on a RunPod network volume
+# mounted at /runpod-volume/models/ and are exposed to ComfyUI via
+# extra_model_paths.yaml. To update a model or add a LoRA/checkpoint, run
+# scripts/sync_models.py instead of rebuilding this image.
 #
-# The LoRA filename must match docker/comfyui/workflows/pixel_art_generate.json:
-#   "lora_name": "flux-2d-game-assets.safetensors"
+# Iteration cycle compared to a fat image:
+#   - Code changes (workflow_builder, tools, skills):     no image rebuild needed
+#   - Model updates (new LoRA or checkpoint):              volume sync (~seconds-minutes)
+#   - Custom node changes / entrypoint changes:            rebuild this image (~4-5 min)
 #
-# Built by .github/workflows/docker-image.yml on tag push (docker-v*).
+# Rationale and attempt-1 post-mortem: docs/examples/volume-approach/README.md.
 
-# NOTE: must be the -fp8 variant, not -flux1-dev. The -flux1-dev variant
-# stores FLUX at models/unet/flux1-dev.safetensors (requires UNETLoader +
-# DualCLIPLoader + VAELoader); only the -fp8 variant has the combined
-# checkpoint at models/checkpoints/flux1-dev-fp8.safetensors that
-# CheckpointLoaderSimple can load.
-FROM runpod/worker-comfyui:5.8.5-flux1-dev-fp8
+FROM runpod/worker-comfyui:5.8.5-base-cuda12.8.1
 
-# Source filename on HF is game_assets_v3.safetensors (~90 MB). We rename
-# on download so the local filename matches what workflow_builder.py and
-# pixel_art_generate.json reference.
-RUN mkdir -p /comfyui/models/loras && \
-    wget -q -O /comfyui/models/loras/flux-2d-game-assets.safetensors \
-      "https://huggingface.co/gokaygokay/Flux-2D-Game-Assets-LoRA/resolve/main/game_assets_v3.safetensors" && \
-    test -s /comfyui/models/loras/flux-2d-game-assets.safetensors
+# rembg custom node for background removal at inference time (also used
+# client-side in sprite_me.processing.background as a fallback).
+RUN cd /comfyui/custom_nodes && \
+    git clone --depth 1 https://github.com/Jcd1230/rembg-comfyui-node.git && \
+    cd rembg-comfyui-node && \
+    pip install --no-cache-dir -r requirements.txt
+
+# Tell ComfyUI to read models from the mounted network volume in addition
+# to the image-local /comfyui/models/ tree.
+COPY extra_model_paths.yaml /comfyui/extra_model_paths.yaml
+
+# Custom entrypoint: sanity-check the volume mount, then hand off to the
+# upstream runpod/worker-comfyui start script. Baked into the image as a
+# proper file (NOT a --docker-start-cmd one-liner — attempt 1 taught us
+# that quoting through runpodctl/Docker/bash is unreliable).
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]

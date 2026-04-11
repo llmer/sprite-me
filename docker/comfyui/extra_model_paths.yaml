@@ -1,0 +1,35 @@
+# sprite-me: tell ComfyUI to also look in /runpod-volume/models/ for model files.
+#
+# Baked into the Docker image at /comfyui/extra_model_paths.yaml (ComfyUI
+# reads this file automatically on startup). The top-level key is an
+# arbitrary namespace — ComfyUI merges all configured paths with its default
+# /comfyui/models/ tree.
+#
+# Each line maps a ComfyUI model type (checkpoints, loras, etc.) to a
+# subdirectory relative to base_path. Multiple model types can alias the
+# same physical directory (e.g. clip and text_encoders both read from
+# text_encoders/) because FLUX and SD conventions differ.
+#
+# Seeding the volume: run scripts/sync_models.py OR wget directly from a
+# CPU pod attached to the volume. Expected layout:
+#
+#   /runpod-volume/models/
+#     checkpoints/flux1-dev-fp8.safetensors
+#     diffusion_models/flux1-dev-kontext_fp8_scaled.safetensors
+#     loras/flux-2d-game-assets.safetensors
+#     text_encoders/clip_l.safetensors
+#     text_encoders/t5xxl_fp8_e4m3fn.safetensors
+#     vae/ae.safetensors
+
+sprite_me:
+  base_path: /runpod-volume/models/
+  checkpoints: checkpoints/
+  clip: text_encoders/
+  clip_vision: clip_vision/
+  controlnet: controlnet/
+  diffusion_models: diffusion_models/
+  embeddings: embeddings/
+  loras: loras/
+  text_encoders: text_encoders/
+  unet: diffusion_models/
+  vae: vae/

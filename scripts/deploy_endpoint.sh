@@ -1,15 +1,23 @@
 #!/usr/bin/env bash
-# Create (or update) the sprite-me RunPod serverless template + endpoint.
-#
-# Approach: bake the LoRA into a custom image (see docker/comfyui/Dockerfile)
-# and let RunPod schedule workers on any available RTX 5090. No network volume,
-# no datacenter constraint.
+# Create a sprite-me RunPod serverless template + endpoint and attach
+# network volumes. Models are NOT baked into the image — they live on
+# the attached volume(s) and ComfyUI reads them via extra_model_paths.yaml.
+# (See docker/comfyui/Dockerfile for the thin-image architecture.)
 #
 # Requires:
 #   - runpodctl installed (https://cli.runpod.net)
 #   - RUNPOD_API_KEY in env (or sourced from /Users/jim/src/vid/.env)
-#   - Docker image pushed to Docker Hub (GitHub Actions handles this — see
-#     .github/workflows/docker-image.yml)
+#   - Docker image pushed to Docker Hub (GitHub Actions handles this)
+#   - One or more pre-seeded network volumes. Create via:
+#       runpodctl network-volume create --name sprite-me-v2 \
+#         --size 50 --data-center-id EU-RO-1
+#     and seed via a CPU pod or scripts/sync_models.py.
+#
+# Usage (env-var driven):
+#   IMAGE=bbbasddaaa/sprite-me-comfyui:v0.2.0 \
+#   VOLUME_IDS=vol_abc123,vol_def456 \
+#   GPU_ID="NVIDIA GeForce RTX 5090" \
+#   ./scripts/deploy_endpoint.sh
 
 set -euo pipefail
 
@@ -18,9 +26,13 @@ IMAGE="${IMAGE:-bbbasddaaa/sprite-me-comfyui:latest}"
 GPU_ID="${GPU_ID:-NVIDIA GeForce RTX 5090}"
 TEMPLATE_NAME="${TEMPLATE_NAME:-sprite-me}"
 ENDPOINT_NAME="${ENDPOINT_NAME:-sprite-me}"
-# The image is ~30 GB compressed, decompressed is ~50 GB. 80 GB gives
-# headroom for extraction + ComfyUI temp files + outputs.
-CONTAINER_DISK_GB="${CONTAINER_DISK_GB:-80}"
+# Thin image is ~16 GB compressed. 30 GB container disk is plenty for
+# extraction + ComfyUI temp files + outputs (models live on the volume).
+CONTAINER_DISK_GB="${CONTAINER_DISK_GB:-30}"
+# Comma-separated list of network volume IDs to attach to the endpoint.
+# At least one is required — the endpoint needs a volume with the models
+# for ComfyUI to load anything.
+VOLUME_IDS="${VOLUME_IDS:-}"
 
 info() { printf "\033[36m[sprite-me]\033[0m %s\n" "$*"; }
 error() { printf "\033[31m[sprite-me]\033[0m %s\n" "$*" >&2; }
@@ -34,12 +46,18 @@ fi
 
 if [ -z "${RUNPOD_API_KEY:-}" ]; then
   error "RUNPOD_API_KEY not set and /Users/jim/src/vid/.env doesn't have it."
-  error "Export RUNPOD_API_KEY=... or source your .env first."
   exit 1
 fi
 
-info "Image: $IMAGE"
-info "GPU: $GPU_ID"
+if [ -z "$VOLUME_IDS" ]; then
+  error "VOLUME_IDS not set. Pass a comma-separated list of network volume IDs."
+  error "List existing volumes with: runpodctl network-volume list"
+  exit 1
+fi
+
+info "Image:     $IMAGE"
+info "GPU:       $GPU_ID"
+info "Volumes:   $VOLUME_IDS"
 
 # 1. Create the serverless template
 info "Creating serverless template '$TEMPLATE_NAME'..."
@@ -51,10 +69,10 @@ TEMPLATE_JSON=$(runpodctl template create \
 TEMPLATE_ID=$(echo "$TEMPLATE_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])")
 info "Template ID: $TEMPLATE_ID"
 
-# 2. Create the serverless endpoint (no volume, no DC constraint)
-# workers-max must be > 1 to avoid "throttled" state on a single pinned
-# machine. RunPod explicitly recommends 2-5. See:
-# https://www.answeroverflow.com/m/1192648582847807539
+# 2. Create the serverless endpoint.
+# workers-max must be > 1 so the scheduler can spread across machines;
+# max=5 avoids "throttled" state on a single pinned machine. See:
+#   https://www.answeroverflow.com/m/1192648582847807539
 info "Creating serverless endpoint '$ENDPOINT_NAME'..."
 ENDPOINT_JSON=$(runpodctl serverless create \
   --name "$ENDPOINT_NAME" \
@@ -65,7 +83,31 @@ ENDPOINT_JSON=$(runpodctl serverless create \
 ENDPOINT_ID=$(echo "$ENDPOINT_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])")
 info "Endpoint ID: $ENDPOINT_ID"
 
-# 3. Write IDs to .env (overwrites previous values)
+# 3. Attach network volumes. runpodctl doesn't support this flag on
+# serverless create (as of 2.1.x), so we PATCH the REST API.
+info "Attaching volume(s) to endpoint..."
+VOLUME_JSON=$(python3 -c "
+import json, sys
+ids = '$VOLUME_IDS'.split(',')
+print(json.dumps({'networkVolumeIds': [v.strip() for v in ids if v.strip()]}))
+")
+ATTACH_RESP=$(curl -sX PATCH "https://rest.runpod.io/v1/endpoints/$ENDPOINT_ID" \
+  -H "Authorization: Bearer $RUNPOD_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d "$VOLUME_JSON")
+ATTACHED=$(echo "$ATTACH_RESP" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+ids = d.get('networkVolumeIds', [])
+print(','.join(ids) if ids else 'NONE')
+" 2>/dev/null || echo "PARSE_ERROR")
+if [ "$ATTACHED" = "NONE" ] || [ "$ATTACHED" = "PARSE_ERROR" ]; then
+  error "Volume attach failed. Response: $ATTACH_RESP"
+  exit 1
+fi
+info "Attached: $ATTACHED"
+
+# 4. Write IDs to .env (overwrites previous values)
 info "Writing $REPO_DIR/.env"
 cat > "$REPO_DIR/.env" <<EOF
 # sprite-me runtime config (gitignored — do not commit)
@@ -77,7 +119,8 @@ SPRITE_ME_RUNPOD_TEMPLATE_ID=$TEMPLATE_ID
 #   Image:     $IMAGE
 #   Template:  $TEMPLATE_ID  ($TEMPLATE_NAME)
 #   Endpoint:  $ENDPOINT_ID  ($ENDPOINT_NAME)
-#   GPU:       $GPU_ID, max-workers=1, scale-to-zero
+#   Volumes:   $VOLUME_IDS
+#   GPU:       $GPU_ID, max-workers=5, scale-to-zero
 EOF
 
 info ""
