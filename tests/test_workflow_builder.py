@@ -47,7 +47,11 @@ def test_generate_workflow_lora_strength():
     assert nodes["2"]["inputs"]["strength_clip"] == 0.6
 
 
-def test_animate_workflow_scales_width_by_frames():
+def test_animate_workflow_uses_batch_size():
+    """Animation uses batch_size=N, not a wide side-by-side latent.
+
+    Each frame is a full centered character at the per-frame dimensions.
+    """
     nodes = build_animate_workflow(
         reference_image_b64="",
         animation_prompt="walk cycle",
@@ -55,21 +59,25 @@ def test_animate_workflow_scales_width_by_frames():
         width=512,
         height=512,
     )
-    # Wide latent should be 512 * 6 = 3072
-    assert nodes["5"]["inputs"]["width"] == 3072
+    # Width stays at the per-frame size, batch_size encodes the frame count.
+    assert nodes["5"]["inputs"]["width"] == 512
     assert nodes["5"]["inputs"]["height"] == 512
+    assert nodes["5"]["inputs"]["batch_size"] == 6
 
 
-def test_animate_workflow_includes_frame_count_in_prompt():
+def test_animate_workflow_embeds_animation_prompt():
     nodes = build_animate_workflow(
         reference_image_b64="",
-        animation_prompt="attack",
-        frames=8,
+        animation_prompt="attack swing",
+        frames=4,
     )
     prompt_text = nodes["3"]["inputs"]["text"]
-    assert "8 frames" in prompt_text
-    assert "attack" in prompt_text
-    assert "sprite sheet" in prompt_text
+    assert "GRPZA" in prompt_text
+    assert "attack swing" in prompt_text
+    assert "game asset" in prompt_text
+    assert "white background" in prompt_text
+    # batch_size=N controls frame count, not the prompt text
+    assert nodes["5"]["inputs"]["batch_size"] == 4
 
 
 def test_animate_workflow_returns_raw_node_dict():

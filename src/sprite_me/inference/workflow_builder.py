@@ -66,8 +66,12 @@ def build_generate_workflow(
     nodes["2"]["inputs"]["strength_model"] = lora_strength
     nodes["2"]["inputs"]["strength_clip"] = lora_strength
 
-    # Positive prompt — prepend LoRA trigger word (node 3 = CLIPTextEncode positive)
-    full_prompt = f"{lora_trigger}, pixel art, game sprite, {prompt}, white background"
+    # Positive prompt format taken verbatim from the Flux-2D-Game-Assets-LoRA
+    # model card "Usage" section:
+    #   GRPZA, <<Your Prompt>>, white background, game asset
+    # Matching this order preserves the trigger+suffix shape the LoRA was
+    # trained on. Users can include "pixel art" etc. in their own prompt.
+    full_prompt = f"{lora_trigger}, {prompt}, white background, game asset"
     nodes["3"]["inputs"]["text"] = full_prompt
 
     # Negative prompt (node 4 = CLIPTextEncode negative)
@@ -101,11 +105,35 @@ def build_animate_workflow(
     lora_trigger: str = "GRPZA",
     edge_margin: int = 6,
 ) -> dict[str, Any]:
-    """Build a FLUX animation workflow that generates N frames in a sprite sheet.
+    """Build a FLUX animation workflow that generates N frame candidates.
 
-    Simplified approach: render all frames side-by-side as a single wide
-    image, then split client-side. A more advanced version would use
-    ControlNet pose conditioning or Sprite Sheet Diffusion.
+    EXPERIMENTAL — the current approach uses `batch_size=N` on a single
+    `EmptySD3LatentImage`, which gives N independent same-prompt variations.
+    Each candidate is a full centered character sprite (not a strip), so
+    you can use them as idle-breathing variations or as a starting point
+    for hand-selecting frames.
+
+    This is NOT a proper animation cycle: there is no pose control and no
+    inter-frame coherence. For real walk/attack cycles you'd want either:
+      - IP-Adapter / reference_image conditioning + explicit per-frame
+        pose prompts (would require additional custom nodes in the image)
+      - Sprite Sheet Diffusion (arxiv 2412.03685) — needs a custom model
+      - Per-frame generation with ControlNet OpenPose
+
+    A previous attempt rendered frames side-by-side in a single wide
+    latent (width * N × height). That produced visually interesting output
+    but the characters drifted in position and weren't frame-aligned, so
+    the sprite sheet couldn't be sliced cleanly. batch_size is strictly
+    better for this use case.
+
+    Args:
+        reference_image_b64: Currently unused (reserved for future IP-Adapter
+            integration). Pass "" for now.
+        animation_prompt: Describes the desired animation / motion.
+        frames: Number of candidate frames to generate in one batch (=N).
+        width, height: Per-frame dimensions (each frame is a full image).
+        seed: Base seed. All frames share this seed so their random
+            variation comes from the batch index, not fresh RNG.
     """
     return {
         "1": {
@@ -125,23 +153,24 @@ def build_animate_workflow(
         "3": {
             "class_type": "CLIPTextEncode",
             "inputs": {
-                "text": f"{lora_trigger}, pixel art sprite sheet, {animation_prompt}, {frames} frames, white background, consistent character",
+                # HF model card order: GRPZA, <prompt>, white background, game asset.
+                "text": f"{lora_trigger}, {animation_prompt}, centered character, white background, game asset",
                 "clip": ["2", 1],
             },
         },
         "4": {
             "class_type": "CLIPTextEncode",
             "inputs": {
-                "text": "blurry, low quality, watermark, text, realistic, photograph, 3d render, inconsistent",
+                "text": "blurry, low quality, watermark, text, realistic, photograph, 3d render",
                 "clip": ["2", 1],
             },
         },
         "5": {
             "class_type": "EmptySD3LatentImage",
             "inputs": {
-                "width": width * frames,
+                "width": width,
                 "height": height,
-                "batch_size": 1,
+                "batch_size": frames,
             },
         },
         "9": {
