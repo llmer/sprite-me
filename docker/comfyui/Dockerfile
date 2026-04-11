@@ -1,18 +1,30 @@
-# sprite-me ComfyUI worker image — thin.
+# sprite-me ComfyUI worker image — fat base + volume for additions.
 #
-# Models are NOT baked into this image. They live on a RunPod network volume
-# mounted at /runpod-volume/models/ and are exposed to ComfyUI via
-# extra_model_paths.yaml. To update a model or add a LoRA/checkpoint, run
-# scripts/sync_models.py instead of rebuilding this image.
+# We use the FLUX variant base (which already has torch + ComfyUI runtime
+# + the FLUX.1-dev fp8 checkpoint baked in) NOT the -base-cuda12.8.1 variant.
+# The "base" variant has CUDA but no Python ML deps installed, and bolting
+# torch + ComfyUI requirements on top isn't worth the ~3.5 GB savings.
 #
-# Iteration cycle compared to a fat image:
-#   - Code changes (workflow_builder, tools, skills):     no image rebuild needed
-#   - Model updates (new LoRA or checkpoint):              volume sync (~seconds-minutes)
-#   - Custom node changes / entrypoint changes:            rebuild this image (~4-5 min)
+# What this image gives us:
+#   - All FLUX.1-dev fp8 deps (torch, comfy, transformers, etc.) ready at boot
+#   - flux1-dev-fp8.safetensors baked in /comfyui/models/checkpoints/ (default)
+#   - Custom entrypoint.sh + extra_model_paths.yaml that ALSO read from
+#     /runpod-volume/models/ — so we can ADD models (Kontext, new LoRAs)
+#     via scripts/sync_models.py without rebuilding the image
+#
+# Iteration cycle benefits:
+#   - Adding/updating LoRAs:         volume sync, no rebuild           (~1 min)
+#   - Adding new checkpoints (e.g.   volume sync, no rebuild           (~5 min)
+#     Kontext for animation):
+#   - Code/workflow JSON changes:    no infrastructure touched         (instant)
+#   - Custom node / entrypoint:      rebuild this image                (~10 min)
+#
+# Cold-start cost stays at ~7 min for the first pull on a fresh machine,
+# then flashboot + cached layers make subsequent workers fast.
 #
 # Rationale and attempt-1 post-mortem: docs/examples/volume-approach/README.md.
 
-FROM runpod/worker-comfyui:5.8.5-base-cuda12.8.1
+FROM runpod/worker-comfyui:5.8.5-flux1-dev-fp8
 
 # rembg custom node for background removal at inference time (also used
 # client-side in sprite_me.processing.background as a fallback).
