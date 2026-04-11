@@ -20,7 +20,7 @@ async def generate_sprite(
     height: int | None = None,
     seed: int | None = None,
     steps: int | None = None,
-    cfg: float | None = None,
+    guidance: float | None = None,
     lora_strength: float | None = None,
     smart_crop_mode: str | None = None,
     remove_bg: bool = True,
@@ -52,7 +52,7 @@ async def generate_sprite(
         height=height or settings.default_height,
         seed=actual_seed,
         steps=steps or settings.default_steps,
-        cfg=cfg or settings.default_cfg_scale,
+        guidance=guidance or settings.default_guidance,
         lora_strength=lora_strength or settings.default_lora_strength,
     )
 

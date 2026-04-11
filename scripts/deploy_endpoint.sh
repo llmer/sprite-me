@@ -18,7 +18,9 @@ IMAGE="${IMAGE:-bbbasddaaa/sprite-me-comfyui:latest}"
 GPU_ID="${GPU_ID:-NVIDIA GeForce RTX 5090}"
 TEMPLATE_NAME="${TEMPLATE_NAME:-sprite-me}"
 ENDPOINT_NAME="${ENDPOINT_NAME:-sprite-me}"
-CONTAINER_DISK_GB="${CONTAINER_DISK_GB:-30}"
+# The image is ~30 GB compressed, decompressed is ~50 GB. 80 GB gives
+# headroom for extraction + ComfyUI temp files + outputs.
+CONTAINER_DISK_GB="${CONTAINER_DISK_GB:-80}"
 
 info() { printf "\033[36m[sprite-me]\033[0m %s\n" "$*"; }
 error() { printf "\033[31m[sprite-me]\033[0m %s\n" "$*" >&2; }
@@ -50,13 +52,16 @@ TEMPLATE_ID=$(echo "$TEMPLATE_JSON" | python3 -c "import json,sys; print(json.lo
 info "Template ID: $TEMPLATE_ID"
 
 # 2. Create the serverless endpoint (no volume, no DC constraint)
+# workers-max must be > 1 to avoid "throttled" state on a single pinned
+# machine. RunPod explicitly recommends 2-5. See:
+# https://www.answeroverflow.com/m/1192648582847807539
 info "Creating serverless endpoint '$ENDPOINT_NAME'..."
 ENDPOINT_JSON=$(runpodctl serverless create \
   --name "$ENDPOINT_NAME" \
   --template-id "$TEMPLATE_ID" \
   --gpu-id "$GPU_ID" \
   --workers-min 0 \
-  --workers-max 1)
+  --workers-max 5)
 ENDPOINT_ID=$(echo "$ENDPOINT_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])")
 info "Endpoint ID: $ENDPOINT_ID"
 

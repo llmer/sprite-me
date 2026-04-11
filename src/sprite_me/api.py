@@ -35,7 +35,7 @@ class GenerateRequest(BaseModel):
     height: int = 512
     seed: int | None = None
     steps: int = 30
-    cfg: float = 3.5
+    guidance: float = 3.5
     lora_strength: float = 0.85
     smart_crop_mode: str = "tightest"
     remove_bg: bool = True
@@ -95,7 +95,7 @@ async def api_generate(req: GenerateRequest) -> dict[str, Any]:
         height=req.height,
         seed=req.seed,
         steps=req.steps,
-        cfg=req.cfg,
+        guidance=req.guidance,
         lora_strength=req.lora_strength,
         smart_crop_mode=req.smart_crop_mode,
         remove_bg=req.remove_bg,

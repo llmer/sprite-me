@@ -64,7 +64,7 @@ async def generate_sprite(
     height: int = 512,
     seed: int | None = None,
     steps: int = 30,
-    cfg: float = 3.5,
+    guidance: float = 3.5,
     lora_strength: float = 0.85,
     smart_crop_mode: str = "tightest",
     remove_bg: bool = True,
@@ -81,7 +81,7 @@ async def generate_sprite(
         height: Output height in pixels (default 512).
         seed: Random seed for reproducibility. None = random.
         steps: Inference steps (more = higher quality, slower).
-        cfg: Classifier-free guidance scale.
+        guidance: FluxGuidance scale (3.5 is a good default).
         lora_strength: How strongly the game-asset LoRA influences output (0-1).
         smart_crop_mode: "tightest" or "padded".
         remove_bg: If true, output transparent background.
@@ -97,7 +97,7 @@ async def generate_sprite(
         height=height,
         seed=seed,
         steps=steps,
-        cfg=cfg,
+        guidance=guidance,
         lora_strength=lora_strength,
         smart_crop_mode=smart_crop_mode,
         remove_bg=remove_bg,

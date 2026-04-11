@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     default_width: int = 512
     default_height: int = 512
     default_steps: int = 30
-    default_cfg_scale: float = 3.5
+    default_guidance: float = 3.5
     default_smart_crop_mode: str = "tightest"
     lora_trigger_word: str = "GRPZA"
 

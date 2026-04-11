@@ -9,7 +9,12 @@
 #
 # Built by .github/workflows/docker-image.yml on tag push (docker-v*).
 
-FROM runpod/worker-comfyui:5.0.0-flux1-dev
+# NOTE: must be the -fp8 variant, not -flux1-dev. The -flux1-dev variant
+# stores FLUX at models/unet/flux1-dev.safetensors (requires UNETLoader +
+# DualCLIPLoader + VAELoader); only the -fp8 variant has the combined
+# checkpoint at models/checkpoints/flux1-dev-fp8.safetensors that
+# CheckpointLoaderSimple can load.
+FROM runpod/worker-comfyui:5.8.5-flux1-dev-fp8
 
 # Source filename on HF is game_assets_v3.safetensors (~90 MB). We rename
 # on download so the local filename matches what workflow_builder.py and
