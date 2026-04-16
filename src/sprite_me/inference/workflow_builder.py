@@ -25,6 +25,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from sprite_me.loras import DEFAULT_LORA, format_prompt, get_profile
+
 _WORKFLOW_DIR = Path(__file__).parent.parent.parent.parent / "docker" / "comfyui" / "workflows"
 
 
@@ -42,8 +44,8 @@ def build_generate_workflow(
     seed: int = 0,
     steps: int = 20,
     guidance: float = 3.5,
-    lora_strength: float = 0.85,
-    lora_trigger: str = "GRPZA",
+    lora: str = DEFAULT_LORA,
+    lora_strength: float | None = None,
 ) -> dict[str, Any]:
     """Build a FLUX+LoRA pixel art generation workflow from a text prompt.
 
@@ -57,22 +59,27 @@ def build_generate_workflow(
         steps: Sampling steps (20 is a good FLUX default; 30 for extra quality).
         guidance: FluxGuidance scale (was called cfg in SD; 3.5 is the
             worker-comfyui test default).
-        lora_strength: Strength of the Flux-2D-Game-Assets LoRA (0.0-1.0).
-        lora_trigger: LoRA activation word (GRPZA for Flux-2D-Game-Assets).
+        lora: Profile key from `sprite_me.loras.LORAS` — selects the
+            filename, trigger word, and prompt template used below.
+        lora_strength: Override the profile's default strength (0.0-1.0).
+            None = use the profile default.
     """
+    profile = get_profile(lora)
+    strength = lora_strength if lora_strength is not None else profile.default_strength
+
     nodes = _load_template("pixel_art_generate.json")
 
-    # LoRA strength (node 2 = LoraLoader)
-    nodes["2"]["inputs"]["strength_model"] = lora_strength
-    nodes["2"]["inputs"]["strength_clip"] = lora_strength
+    # LoRA file + strength (node 2 = LoraLoader). The template's default
+    # filename is overwritten here so callers can swap LoRAs without
+    # editing the JSON.
+    nodes["2"]["inputs"]["lora_name"] = profile.name
+    nodes["2"]["inputs"]["strength_model"] = strength
+    nodes["2"]["inputs"]["strength_clip"] = strength
 
-    # Positive prompt format taken verbatim from the Flux-2D-Game-Assets-LoRA
-    # model card "Usage" section:
-    #   GRPZA, <<Your Prompt>>, white background, game asset
-    # Matching this order preserves the trigger+suffix shape the LoRA was
-    # trained on. Users can include "pixel art" etc. in their own prompt.
-    full_prompt = f"{lora_trigger}, {prompt}, white background, game asset"
-    nodes["3"]["inputs"]["text"] = full_prompt
+    # Each profile owns its own prompt shape — trigger-word LoRAs keep
+    # the "GRPZA, ..., white background, game asset" form; BLIP-captioned
+    # LoRAs use "a pixel art sprite of ...".
+    nodes["3"]["inputs"]["text"] = format_prompt(profile, prompt)
 
     # Negative prompt (node 4 = CLIPTextEncode negative)
     nodes["4"]["inputs"]["text"] = negative_prompt

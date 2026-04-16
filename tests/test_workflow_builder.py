@@ -46,6 +46,58 @@ def test_generate_workflow_lora_strength():
     assert nodes["2"]["inputs"]["strength_clip"] == 0.6
 
 
+def test_generate_workflow_default_lora_is_cartoon_vector():
+    """Default profile keeps the GRPZA cartoon-vector behaviour — no regressions."""
+    nodes = build_generate_workflow(prompt="slime")
+    assert nodes["2"]["inputs"]["lora_name"] == "flux-2d-game-assets.safetensors"
+    assert nodes["2"]["inputs"]["strength_model"] == 0.85
+    text = nodes["3"]["inputs"]["text"]
+    assert text.startswith("GRPZA,")
+    assert "white background, game asset" in text
+
+
+def test_generate_workflow_pixel_indie_profile():
+    """pixel-indie profile uses its own phrase trigger, not GRPZA,
+    and swaps the LoRA filename.
+    """
+    nodes = build_generate_workflow(
+        prompt="young trainer with red cap holding a pokeball",
+        lora="pixel-indie",
+    )
+    assert nodes["2"]["inputs"]["lora_name"] == "trainer-sprites-gen5.safetensors"
+    assert nodes["2"]["inputs"]["strength_model"] == 1.0
+    text = nodes["3"]["inputs"]["text"]
+    assert "GRPZA" not in text
+    assert text.startswith("A pixelart drawing of")
+    assert "young trainer with red cap" in text
+
+
+def test_generate_workflow_pixel_retro_profile():
+    """pixel-retro LoRA uses its own trigger and cartoon suffix."""
+    nodes = build_generate_workflow(prompt="blue slime", lora="pixel-retro")
+    assert nodes["2"]["inputs"]["lora_name"] == "pixel-game-assets-dever.safetensors"
+    text = nodes["3"]["inputs"]["text"]
+    assert text.startswith("dvr-pixel-flux,")
+    assert "illustration, cartoon" in text
+
+
+def test_generate_workflow_top_down_profile_has_no_trigger():
+    """top-down has no trigger word — the template should not leave a
+    leading comma or whitespace.
+    """
+    nodes = build_generate_workflow(prompt="stone tile floor", lora="top-down")
+    assert nodes["2"]["inputs"]["lora_name"] == "top-down-pixel-art.safetensors"
+    text = nodes["3"]["inputs"]["text"]
+    assert text.startswith("top-down pixel art of stone tile floor")
+    assert ", ," not in text
+
+
+def test_generate_workflow_unknown_lora_raises():
+    import pytest
+    with pytest.raises(ValueError, match="Unknown LoRA profile"):
+        build_generate_workflow(prompt="x", lora="does-not-exist")
+
+
 # ---------- Animate workflow (Kontext) ----------
 
 

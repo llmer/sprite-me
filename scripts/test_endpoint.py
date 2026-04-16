@@ -32,12 +32,12 @@ _REPO_ROOT = Path(__file__).parent.parent
 load_dotenv(_REPO_ROOT / ".env")
 sys.path.insert(0, str(_REPO_ROOT / "src"))
 
-from sprite_me.animation_presets import available_presets, preset_prompts  # noqa: E402
 from sprite_me.inference.runpod_client import RunPodClient, RunPodError  # noqa: E402
 from sprite_me.inference.workflow_builder import (  # noqa: E402
     build_animate_workflow,
     build_generate_workflow,
 )
+from sprite_me.loras import DEFAULT_LORA, LORAS  # noqa: E402
 from sprite_me.processing.spritesheet import assemble_spritesheet  # noqa: E402
 
 
@@ -53,7 +53,18 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--steps", type=int, default=20)
     p.add_argument("--guidance", type=float, default=3.5)
-    p.add_argument("--lora-strength", type=float, default=0.85)
+    p.add_argument(
+        "--lora",
+        default=DEFAULT_LORA,
+        choices=sorted(LORAS.keys()),
+        help="LoRA profile key (generate mode only)",
+    )
+    p.add_argument(
+        "--lora-strength",
+        type=float,
+        default=None,
+        help="Override profile default strength",
+    )
     p.add_argument(
         "--out",
         default="test_output.png",
@@ -68,16 +79,10 @@ def _parse_args() -> argparse.Namespace:
         help="[animate] Hero PNG path. Required when --animate is set.",
     )
     p.add_argument(
-        "--preset",
-        default="walk",
-        choices=available_presets(),
-        help="[animate] Animation preset. Ignored if --prompt is provided.",
-    )
-    p.add_argument(
-        "--frames",
-        type=int,
-        default=None,
-        help="[animate] Cap frame count (default: preset length, or 1 for --prompt)",
+        "--pose-prompts",
+        help="[animate] Path to a JSON file containing a list of pose prompt "
+             "strings, one per frame. If omitted, uses --prompt as a single "
+             "pose description.",
     )
     return p.parse_args()
 
@@ -90,6 +95,7 @@ async def run_generate(args: argparse.Namespace, client: RunPodClient) -> list[b
         seed=args.seed,
         steps=args.steps,
         guidance=args.guidance,
+        lora=args.lora,
         lora_strength=args.lora_strength,
     )
     return await client.generate(workflow)
@@ -138,24 +144,25 @@ async def run_animate(args: argparse.Namespace, client: RunPodClient) -> list[by
     hero_b64 = base64.b64encode(hero_bytes).decode()
     print(f"Hero: {hero_path} ({len(hero_bytes)} bytes)")
 
-    # Resolve frame list
-    explicit_prompt = args.prompt and args.prompt != "knight with longsword"
-    if explicit_prompt:
-        n = args.frames or 1
-        pose_prompts = [
-            f"{args.prompt}. Keep the exact same character, clothing, armor, weapon, "
-            f"color palette, and art style unchanged. White background."
-        ] * n
+    # Resolve frame list: either a JSON file of prompts, or a single prompt
+    # via --prompt that becomes one frame.
+    if args.pose_prompts:
+        import json as _json
+        pose_prompts = _json.loads(Path(args.pose_prompts).read_text())
+        if not isinstance(pose_prompts, list) or not all(isinstance(p, str) for p in pose_prompts):
+            raise ValueError("--pose-prompts must be a JSON list of strings")
     else:
-        preset = preset_prompts(args.preset) or []
-        if args.frames and args.frames < len(preset):
-            pose_prompts = preset[:args.frames]
-        else:
-            pose_prompts = preset
-    print(f"Preset: {args.preset if not explicit_prompt else '(custom)'}, frames: {len(pose_prompts)}")
+        pose_prompts = [args.prompt]
+    print(f"Frames: {len(pose_prompts)}")
 
     frames: list[bytes] = []
+    _preservation = (
+        "Keep the exact same character, clothing, armor, weapon, "
+        "color palette, and art style unchanged. White background."
+    )
     for i, pp in enumerate(pose_prompts):
+        if "unchanged" not in pp.lower():
+            pp = f"{pp.rstrip('. ')}. {_preservation}"
         t = time.time()
         print(f"  frame {i+1}/{len(pose_prompts)}: {pp[:60]}...")
         frame = await _generate_animate_frame(

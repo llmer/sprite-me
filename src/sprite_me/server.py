@@ -14,6 +14,7 @@ from mcp.server.fastmcp import FastMCP
 
 from sprite_me.config import settings
 from sprite_me.inference.runpod_client import RunPodClient
+from sprite_me.loras import DEFAULT_LORA, LORAS
 from sprite_me.storage.local import LocalStorage
 from sprite_me.storage.manifest import AssetManifest
 from sprite_me.tools.animate import animate_sprite as _animate_sprite
@@ -65,7 +66,8 @@ async def generate_sprite(
     seed: int | None = None,
     steps: int = 30,
     guidance: float = 3.5,
-    lora_strength: float = 0.85,
+    lora: str = DEFAULT_LORA,
+    lora_strength: float | None = None,
     smart_crop_mode: str = "tightest",
     remove_bg: bool = True,
     pixelate: bool = False,
@@ -85,7 +87,22 @@ async def generate_sprite(
         seed: Random seed for reproducibility. None = random.
         steps: Inference steps (more = higher quality, slower).
         guidance: FluxGuidance scale (3.5 is a good default).
-        lora_strength: How strongly the game-asset LoRA influences output (0-1).
+        lora: LoRA profile key. Picks the art style. Call list_loras()
+            to get the full up-to-date list with empirical descriptions.
+            Available profiles (see src/sprite_me/loras.py for details):
+              - "cartoon-vector" (default): smooth cartoon/vector — heavy
+                black outlines, flat fills, casual-game polish. NOT pixel
+                art. [best for: cartoon, vector, heroes, casual-game]
+              - "pixel-indie": clean modern pixel art with visible grid,
+                vibrant colors, JRPG/indie-Steam feel. Works across humans
+                and creatures. [best for: pixel-art, indie, jrpg]
+              - "pixel-retro": retro 8/16-bit era small-canvas pixel art.
+                Crunchy palette. Often includes a scene background — may
+                need post-cropping. [best for: retro, 8-bit, 16-bit, nes]
+              - "top-down": bird's-eye perspective scenes (not isolated
+                sprites). [best for: top-down, tiles, environments]
+        lora_strength: Override the profile's default strength (0-1). None =
+            use the profile default.
         smart_crop_mode: "tightest" or "padded".
         remove_bg: If true, output transparent background.
         pixelate: If true, apply a retro pixelation pass after background removal.
@@ -107,6 +124,7 @@ async def generate_sprite(
         seed=seed,
         steps=steps,
         guidance=guidance,
+        lora=lora,
         lora_strength=lora_strength,
         smart_crop_mode=smart_crop_mode,
         remove_bg=remove_bg,
@@ -123,47 +141,48 @@ async def generate_sprite(
 @mcp.tool()
 async def animate_sprite(
     asset_id: str,
-    animation: str = "idle",
-    custom_prompt: str | None = None,
-    frames: int = 6,
-    edge_margin: int = 6,
-    auto_enhance: bool = True,
+    pose_prompts: list[str],
     seed: int | None = None,
+    steps: int = 20,
+    guidance: float = 2.5,
+    edge_margin: int = 6,
     pixelate: bool = False,
     pixel_size: int = 64,
     palette_size: int = 16,
 ) -> dict[str, Any]:
-    """Generate an animated sprite sheet from an existing sprite asset.
+    """Generate a sprite sheet by running one Kontext call per pose prompt.
 
-    The source asset must already exist in the sprite-me manifest. If you have
-    a local PNG, call import_image first to get an asset_id.
+    Before calling this, read the hero asset (via get_asset) to check its
+    body topology and the LoRA that generated it. Compose pose_prompts
+    that match the hero's shape — don't ask a chibi slime to walk or a
+    top-down character to "turn to side view", Kontext will produce
+    morphological garbage. See skills/sprite-me-animate.md for recipes.
 
     Args:
         asset_id: The source sprite to animate.
-        animation: Preset name — idle, walk, run, attack, jump, death, cast.
-        custom_prompt: Override the preset with a custom motion description.
-        frames: Number of animation frames (4-12 typical).
-        edge_margin: Pixel margin around each frame (default 6).
-        auto_enhance: Expand simple prompts into detailed motion descriptions.
-        seed: Random seed for reproducibility.
-        pixelate: If true, apply retro pixelation to each frame. Kontext
-            produces smooth 1024x1024 painterly art; enabling this gives you
-            crisp classic-game sprites ready for retro engines.
-        pixel_size: Target pixel resolution per frame (64 classic, 32 Game Boy).
-        palette_size: Max colors per frame (16 classic, 8 Game Boy).
+        pose_prompts: One pose-change instruction per output frame, in
+            order. Each should describe what changes in this frame,
+            not the character. Example: "Change the pose to walking
+            forward, left foot lifted mid-stride, side view."
+        seed: Base seed shared across frames (improves consistency).
+        steps: Kontext sampling steps (20 is canonical default).
+        guidance: FluxGuidance scale (2.5 is Kontext default).
+        edge_margin: Smart-crop margin per frame.
+        pixelate: If true, apply retro pixelation to each frame.
+        pixel_size: Target pixel resolution when pixelate=True.
+        palette_size: Max colors per frame when pixelate=True.
 
     Returns:
-        Dict with asset_id, filename, path, animation, frames, source_asset_id.
+        Dict with asset_id, filename, path, frames, source_asset_id, seed.
     """
     runpod, storage, manifest = _services()
     return await _animate_sprite(
         asset_id=asset_id,
-        animation=animation,
-        custom_prompt=custom_prompt,
-        frames=frames,
-        edge_margin=edge_margin,
-        auto_enhance=auto_enhance,
+        pose_prompts=pose_prompts,
         seed=seed,
+        steps=steps,
+        guidance=guidance,
+        edge_margin=edge_margin,
         pixelate=pixelate,
         pixel_size=pixel_size,
         palette_size=palette_size,
@@ -205,6 +224,28 @@ async def check_status(job_id: str) -> dict[str, Any]:
     """
     runpod, _, _ = _services()
     return await _check_status(job_id=job_id, runpod=runpod)
+
+
+@mcp.tool()
+async def list_loras() -> list[dict[str, Any]]:
+    """List the LoRA style profiles available to generate_sprite.
+
+    Returns one dict per profile with key, description, best_for tags,
+    trigger word, and default strength. Use this to pick the right
+    `lora` parameter for a generate_sprite call when the user describes
+    a specific art style (e.g. "Pokemon trainer" → "trainer-sprites",
+    "top-down dungeon tiles" → "top-down").
+    """
+    return [
+        {
+            "key": key,
+            "description": profile.description,
+            "best_for": list(profile.best_for),
+            "trigger": profile.trigger,
+            "default_strength": profile.default_strength,
+        }
+        for key, profile in LORAS.items()
+    ]
 
 
 @mcp.tool()

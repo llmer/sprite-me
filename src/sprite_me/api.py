@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 
 from sprite_me.config import settings
 from sprite_me.inference.runpod_client import RunPodClient
+from sprite_me.loras import DEFAULT_LORA
 from sprite_me.storage.local import LocalStorage
 from sprite_me.storage.manifest import AssetManifest
 from sprite_me.tools.animate import animate_sprite
@@ -36,7 +37,8 @@ class GenerateRequest(BaseModel):
     seed: int | None = None
     steps: int = 30
     guidance: float = 3.5
-    lora_strength: float = 0.85
+    lora: str = DEFAULT_LORA
+    lora_strength: float | None = None
     smart_crop_mode: str = "tightest"
     remove_bg: bool = True
     pixelate: bool = False
@@ -47,12 +49,11 @@ class GenerateRequest(BaseModel):
 
 class AnimateRequest(BaseModel):
     asset_id: str
-    animation: str = "idle"
-    custom_prompt: str | None = None
-    frames: int = 6
-    edge_margin: int = 6
-    auto_enhance: bool = True
+    pose_prompts: list[str]
     seed: int | None = None
+    steps: int = 20
+    guidance: float = 2.5
+    edge_margin: int = 6
     pixelate: bool = False
     pixel_size: int = 64
     palette_size: int = 16
@@ -102,6 +103,7 @@ async def api_generate(req: GenerateRequest) -> dict[str, Any]:
         seed=req.seed,
         steps=req.steps,
         guidance=req.guidance,
+        lora=req.lora,
         lora_strength=req.lora_strength,
         smart_crop_mode=req.smart_crop_mode,
         remove_bg=req.remove_bg,
@@ -119,12 +121,11 @@ async def api_generate(req: GenerateRequest) -> dict[str, Any]:
 async def api_animate(req: AnimateRequest) -> dict[str, Any]:
     return await animate_sprite(
         asset_id=req.asset_id,
-        animation=req.animation,
-        custom_prompt=req.custom_prompt,
-        frames=req.frames,
-        edge_margin=req.edge_margin,
-        auto_enhance=req.auto_enhance,
+        pose_prompts=req.pose_prompts,
         seed=req.seed,
+        steps=req.steps,
+        guidance=req.guidance,
+        edge_margin=req.edge_margin,
         pixelate=req.pixelate,
         pixel_size=req.pixel_size,
         palette_size=req.palette_size,

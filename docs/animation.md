@@ -106,43 +106,43 @@ Good pose prompt: `"Change the pose to walking forward, left foot lifted off the
 
 Bad pose prompt: `"A knight with silver armor and red cape walking forward."` — this re-describes the character, which Kontext will interpret as "generate something new matching this description" and may lose consistency.
 
-## Presets
+## Pose prompts — composed by the agent, not presets
 
-Seven animation types, defined in `src/sprite_me/animation_presets.py`:
+As of v0.5.0, sprite-me does NOT ship a preset library. The caller (usually
+an LLM agent) supplies a list of pose prompts, one per frame. This is
+because the preset library was inherently biased toward side-view
+full-body humanoid heroes — applying "left foot forward, side view" to
+a chibi slime or a top-down character produces morphological garbage.
 
-| Preset | Frames | Notes |
-|---|---|---|
-| `idle` | 4 | Subtle breathing/weight shifts. Good for idle loops. |
-| `walk` | 8 | 8-frame side-view walk cycle, standard game-dev convention |
-| `run` | 8 | Faster sprint, knees-up, both feet off ground at peak |
-| `attack` | 6 | Windup → swing → recover → ready |
-| `jump` | 6 | Crouch → launch → airborne → peak → fall → land |
-| `cast` | 6 | Spell prep → channel → release → return |
-| `death` | 6 | Hit → stagger → kneel → fall → down → defeated |
-
-Each preset is a list of pose prompts with the preservation suffix already
-appended. Frame counts are canonical — you can cap with `frames=N` but
-the tool won't stretch a 4-frame idle to 8 frames automatically.
+Instead, **the agent inspects the hero's body topology** (via
+`get_asset(hero_id)` → reading `metadata.lora` and `prompt`) and composes
+pose prompts that fit. The authoritative recipes live in
+`skills/sprite-me-animate.md` — see that file for side-view walk/attack
+cycles, slime pulses, inanimate lid-opens, top-down rotations, and the
+hard rules about what Kontext can and can't do.
 
 ## API
 
-### MCP tool signature (unchanged from v0.1.x — public contract)
+### MCP tool signature (v0.5.0 — clean break from 0.4.x)
 
 ```python
 animate_sprite(
     asset_id: str,
-    animation: str = "idle",        # preset name OR any label when custom_prompt is set
-    custom_prompt: str | None = None,  # single pose description, overrides preset
-    frames: int | None = None,      # cap or expand (default: preset length)
-    edge_margin: int | None = None, # post-processing crop margin
-    auto_enhance: bool | None = None,  # no-op, kept for back-compat
-    seed: int | None = None,        # same seed across frames improves consistency
+    pose_prompts: list[str],         # REQUIRED — 1 per frame, in order
+    seed: int | None = None,         # same seed across frames improves consistency
+    steps: int = 20,                 # Kontext canonical default
+    guidance: float = 2.5,           # FluxGuidance scale, Kontext default
+    edge_margin: int | None = None,  # post-processing crop margin
+    pixelate: bool = False,          # retro pixelation post-processing
+    pixel_size: int = 64,
+    palette_size: int = 16,
 ) -> dict
 ```
 
-Additional internal parameters (available but not exposed over MCP):
-- `steps: int = 20` (Kontext canonical default)
-- `guidance: float = 2.5` (FluxGuidance scale, Kontext default)
+Removed params (`animation`, `custom_prompt`, `frames`, `auto_enhance`)
+raise `ValueError` with a pointer to the skill file. The tool
+automatically appends the character-preservation suffix to prompts that
+don't already contain it, so agents can focus on pose deltas.
 
 Return shape:
 ```python
@@ -150,7 +150,6 @@ Return shape:
     "asset_id": "abc123",
     "filename": "abc123_sheet.png",
     "path": "/Users/.../assets/abc123_sheet.png",
-    "animation": "walk",
     "frames": 8,
     "source_asset_id": "hero_id_here",
     "seed": 42,
@@ -263,6 +262,6 @@ entrypoint changes) require a GHA rebuild + template update.
 - [Comfy-Org/flux1-kontext-dev_ComfyUI](https://huggingface.co/Comfy-Org/flux1-kontext-dev_ComfyUI) — fp8 checkpoint source
 - `docs/runpod-deployment.md` — how the thin-image + network-volume architecture works
 - `docs/architecture.md` — the two-model pipeline in sprite-me overall
-- `src/sprite_me/animation_presets.py` — the per-frame pose prompt library
+- `skills/sprite-me-animate.md` — pose-prompt composition recipes (the source of truth since v0.5.0)
 - `src/sprite_me/tools/animate.py` — the orchestration code
 - `src/sprite_me/inference/workflow_builder.py` — `build_animate_workflow` — the Kontext node graph constructor

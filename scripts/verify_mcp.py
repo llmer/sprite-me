@@ -38,16 +38,18 @@ from mcp.client.stdio import stdio_client  # noqa: E402
 _EXPECTED_TOOLS = {
     "generate_sprite": {
         "prompt",
-        "pixelate",  # added in the recent pixelation work
+        "lora",       # multi-LoRA support (v0.4.0)
+        "pixelate",   # pixelation post-processing
     },
     "animate_sprite": {
         "asset_id",
-        "animation",
+        "pose_prompts",  # v0.5.0 clean break: agent composes prompts
         "pixelate",
     },
     "import_image": {"source"},
     "check_status": {"job_id"},
     "list_assets": set(),
+    "list_loras": set(),   # v0.4.0 LoRA discovery tool
     "get_asset": {"asset_id"},
     "delete_asset": {"asset_id"},
 }

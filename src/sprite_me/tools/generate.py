@@ -8,6 +8,7 @@ from typing import Any
 from sprite_me.config import settings
 from sprite_me.inference.runpod_client import RunPodClient
 from sprite_me.inference.workflow_builder import build_generate_workflow
+from sprite_me.loras import DEFAULT_LORA
 from sprite_me.processing.background import remove_background
 from sprite_me.processing.crop import smart_crop
 from sprite_me.processing.palette import pixelate as pixelate_image
@@ -22,6 +23,7 @@ async def generate_sprite(
     seed: int | None = None,
     steps: int | None = None,
     guidance: float | None = None,
+    lora: str = DEFAULT_LORA,
     lora_strength: float | None = None,
     smart_crop_mode: str | None = None,
     remove_bg: bool = True,
@@ -69,7 +71,8 @@ async def generate_sprite(
         seed=actual_seed,
         steps=steps or settings.default_steps,
         guidance=guidance or settings.default_guidance,
-        lora_strength=lora_strength or settings.default_lora_strength,
+        lora=lora,
+        lora_strength=lora_strength,
     )
 
     # Submit to RunPod and wait for result
@@ -95,7 +98,9 @@ async def generate_sprite(
             upscale=True,
         )
 
-    # Save to storage
+    # Save to storage. The lora key goes into metadata so later animate_sprite
+    # calls can read it via get_asset and compose pose prompts that match the
+    # hero's body topology (humanoid vs chibi vs top-down, etc.).
     asset = Asset(
         prompt=prompt,
         asset_type="sprite",
@@ -103,6 +108,7 @@ async def generate_sprite(
         height=height or settings.default_height,
         seed=actual_seed,
         reference_asset_id=reference_asset_id,
+        metadata={"lora": lora},
     )
     asset.filename = f"{asset.asset_id}.png"
     asset.name = prompt[:60]

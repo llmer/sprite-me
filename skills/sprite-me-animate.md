@@ -1,143 +1,222 @@
 ---
 name: sprite-me-animate
-description: How to generate pose-varied sprite sheet animations from an existing hero sprite using sprite-me's Kontext-backed animate_sprite tool.
+description: How to animate a hero sprite into a multi-frame sheet using sprite-me's Kontext-backed animate_sprite. Teaches pose prompt composition per character topology.
 ---
 
 # Animating Sprites with sprite-me
 
-## The mental model
+## Mental model
 
-**`animate_sprite` takes a character you already have and produces that same character in different poses.** It does NOT generate a new character. The "hero sprite" you pass in is the ground truth for the character's look — armor, cape color, weapon, face, everything. Each frame of the resulting animation is the same character in a different stance.
+`animate_sprite` takes a hero you already have and produces that same character in different poses, assembled into a sprite sheet. It does NOT generate a new character — the hero image is the ground truth for visual identity (armor, cape, weapon, face). Each frame is the same character in a different stance.
 
-Under the hood this uses FLUX.1 Kontext, a Black Forest Labs model purpose-built for image-guided editing. Character identity is preserved via reference-image conditioning, not via prompt engineering. You don't need to re-describe the character in your prompts.
+Under the hood this uses FLUX.1 Kontext, an image-guided editing model. Character identity is preserved via reference-image conditioning, not prompt engineering — **you don't need to re-describe the character in your pose prompts.**
 
-## Prerequisite: an existing hero sprite
+## The v0.5.0 API — agent-composed pose prompts
 
-You must have a sprite in the sprite-me asset manifest before you can animate it. Two ways:
+`animate_sprite` takes a **list of pose prompts**, one per frame. There are no preset names. You compose the list based on the specific hero's body topology and the user's intent.
 
-1. **Generate it**: `generate_sprite(prompt="knight with longsword and red cape")` returns an `asset_id`. Use that.
-2. **Import it**: `import_image(source="/path/to/hero.png")` returns an `asset_id` for an existing PNG.
-
-Never pass a file path or data URL directly to `animate_sprite` — it only takes `asset_id`.
-
-## The basic flow
-
-```python
-# Step 1: generate the hero once, save the asset_id
-hero = generate_sprite("brave knight with longsword and red cape, detailed armor")
-# → {"asset_id": "abc123", "filename": "abc123.png", ...}
-
-# Step 2: animate that hero into a walk cycle
-anim = animate_sprite(asset_id="abc123", animation="walk")
-# → {"asset_id": "def456", "filename": "def456_sheet.png", "frames": 8, ...}
 ```
-
-You'll get back a single sprite-sheet PNG plus individual frame PNGs (`def456_frame00.png` through `def456_frame07.png`) in the assets directory. The sheet is assembled horizontally.
-
-## Presets
-
-Seven animation types are built in, each with a curated list of pose prompts:
-
-| Preset | Frames | What it generates |
-|---|---|---|
-| `idle` | 4 | Standing still with subtle breathing/weight shifts |
-| `walk` | 8 | Standard 8-frame walk cycle (side view) |
-| `run` | 8 | Full sprint with high knees and ground clearance |
-| `attack` | 6 | Weapon windup → swing → recover → ready |
-| `jump` | 6 | Crouch → launch → airborne → peak → fall → land |
-| `cast` | 6 | Spell prep → channel → release → recover |
-| `death` | 6 | Hit → stagger → kneel → fall → down → defeated |
-
-Call with `animate_sprite(asset_id=..., animation="walk")`. You can cap frame count with `frames=4` to trim a preset to the first N frames.
-
-## Custom pose prompts
-
-If you want a single specific pose that isn't in a preset, use `custom_prompt`:
-
-```python
 animate_sprite(
     asset_id="abc123",
-    custom_prompt="crouching behind a stone shield, looking upward",
-    frames=1,  # just one pose
+    pose_prompts=[
+        "Change the pose to standing still, arms at sides.",
+        "Change the pose to walking forward, left foot lifted mid-stride, side view.",
+        "Change the pose to mid-step with both feet near the ground.",
+        "Change the pose to walking forward, right foot lifted mid-stride, side view.",
+    ],
+    seed=42,
 )
 ```
 
-**Custom prompt format**: describe the NEW pose only. Do NOT re-describe the character. The tool automatically appends a "keep the character, clothing, armor, weapon, palette, and art style unchanged" clause. Keep it short and specific — `"raising the sword overhead in a heroic pose"` is better than `"a knight with shiny silver armor and red cape raising a longsword"`.
+The tool automatically appends a character-preservation clause ("Keep the exact same character, clothing, armor...") if you didn't include one, so you can focus on describing the pose change.
 
-## Quality expectations
+**If you pass the old `animation="walk"` or `custom_prompt="..."` params, the tool will error out with a clear message pointing back at this skill file.** Those are gone.
 
-This produces keyframes, not broadcast animation. Expect:
+## Step 1: Read the hero before animating
 
-- **Strong character consistency** — same armor, same cape color, same weapon, same face. This is Kontext's main trained objective.
-- **Decent pose fidelity** — the requested pose is interpreted loosely; you'll get something close to what you asked, not pixel-perfect.
-- **Good style consistency** — the hero's art style (cartoon outlined, pixel art, whatever) carries through each frame. The LoRA that made the hero is not re-applied during animation — style flows from the reference image.
-- **No temporal coherence between frames** — each frame is generated independently. For smooth 60fps animation you'll need a tween pass or manual cleanup.
+Before composing pose prompts, call `get_asset(hero_id)` and inspect:
 
-These are usable as **keyframes for game engines** (Godot, Unity, Phaser) after light touch-up. They are not drop-in replacements for hand-animated sprites.
+- **`prompt`** — the original text that generated the hero. Tells you what it is.
+- **`metadata.lora`** — which LoRA generated it (`cartoon-vector`, `pixel-indie`, `pixel-retro`, or `top-down`). Tells you what style to expect.
 
-## Output dimensions
+Then classify the hero's **body topology**, which drives everything else:
 
-Kontext operates at 1024×1024 internally regardless of the hero's original size. Your 512×512 hero will be upscaled by `FluxKontextImageScale` before generation. If you need 512×512 output for your game engine, run each frame through sprite-me's post-processing (which does smart-crop + background removal) or resize externally.
+| Prompt contains... | Topology | Animations that work |
+|---|---|---|
+| knight, warrior, wizard, archer, hero, soldier | **Full-body side-view humanoid** | walk, run, attack, jump, cast, death, idle |
+| slime, blob, ball, creature | **Non-humanoid amorphous** | idle pulse, bounce, stretch — NO walk/attack |
+| chest, crate, barrel, sign, rock | **Inanimate object** | idle shimmer, lid-open (2-3 frames) — decline complex motion |
+| was generated with `lora="top-down"` | **Top-down perspective** | shift/rotate limbs from above — NEVER flip to side view |
+
+**If the topology doesn't match the user's request, say so.** A chibi slime can't attack with a sword. A treasure chest can't walk. Tell the user what WILL work instead. Don't waste a 5-minute cold start generating garbage.
+
+## Step 2: Compose pose prompts that match the topology
+
+These are **recipes**, not presets. Copy, adapt, and modify them to fit the specific hero. Each prompt describes a pose *change* — Kontext expects edit-instruction form ("Change the pose to X"), not description form ("A knight walking").
+
+### Side-view humanoid: 8-frame walk cycle
+
+```python
+[
+    "Change the pose to left leg forward planted, right leg back, mid-stride walk, side view.",
+    "Change the pose to left leg fully forward, right leg lifted behind, arms swinging, side view.",
+    "Change the pose to both legs near together passing mid-step, weight centered, side view.",
+    "Change the pose to right leg forward planted, left leg back, mid-stride walk, side view.",
+    "Change the pose to right leg fully forward, left leg lifted behind, arms swinging, side view.",
+    "Change the pose to both legs near together passing mid-step, weight centered, side view.",
+    "Change the pose to left leg forward planted, right leg back, mid-stride walk, side view.",
+    "Change the pose to left leg fully forward, right leg lifted behind, arms swinging, side view.",
+]
+```
+
+### Side-view humanoid: 6-frame attack
+
+```python
+[
+    "Change the pose to winding up the weapon, pulled back behind the body, shoulders rotated.",
+    "Change the pose to raising the weapon overhead, arms extending forward.",
+    "Change the pose to mid-swing, weapon horizontal at shoulder height, body leaning in.",
+    "Change the pose to completing the swing, weapon extended forward at hip height, weight on front foot.",
+    "Change the pose to recovering, weapon lowered across the body, stepping back.",
+    "Change the pose to ready stance, weapon held in front, knees slightly bent.",
+]
+```
+
+### Side-view humanoid: 4-frame idle (breathing)
+
+```python
+[
+    "Change the pose to a neutral standing idle, weight shifted to the right foot, chest slightly lifted.",
+    "Change the pose to a neutral standing idle, weight centered, chest at rest.",
+    "Change the pose to a neutral standing idle, weight shifted to the left foot, chest slightly lifted.",
+    "Change the pose to a neutral standing idle, weight centered, chest at rest.",
+]
+```
+
+### Non-humanoid (slime, blob): 4-frame idle pulse
+
+```python
+[
+    "Change the shape to squished slightly wider and flatter at the base, as if breathing out.",
+    "Change the shape back to the neutral round form.",
+    "Change the shape to stretched slightly taller and narrower, as if breathing in.",
+    "Change the shape back to the neutral round form.",
+]
+```
+
+Do NOT use "pose" for slimes — they don't have poses, they have shape deformations. Use "shape".
+
+### Inanimate object: simple 2-3 frame animation
+
+Treasure chest opening:
+
+```python
+[
+    "Change the pose to the chest lid beginning to lift upward, a small gap visible between lid and body.",
+    "Change the pose to the chest lid fully open, tilted back, revealing the interior.",
+]
+```
+
+Most inanimate objects should only get 2-3 frames, or the agent should decline and say "that doesn't need to be animated — a single sprite is enough."
+
+### Top-down character: rotate limbs, don't change view
+
+The top-down hero is viewed from above. **Never ask Kontext to flip to side view** — it will rewrite the entire character. Instead:
+
+```python
+[
+    "Shift the legs to a mid-stride position, still viewed from directly above.",
+    "Shift the legs back to a standing neutral position, still viewed from directly above.",
+]
+```
+
+Or rotate the whole character:
+
+```python
+[
+    "Change the facing direction to north, still viewed from directly above.",
+    "Change the facing direction to east, still viewed from directly above.",
+    "Change the facing direction to south, still viewed from directly above.",
+    "Change the facing direction to west, still viewed from directly above.",
+]
+```
+
+## Hard rules (Kontext limitations)
+
+These are things Kontext genuinely cannot do reliably. Don't try them.
+
+1. **Don't change the camera view.** Side → top-down, front → back, etc. Kontext interprets "view" changes as "generate a different character" and identity collapses.
+2. **Don't add or remove limbs.** If the hero is holding a sword with both hands, don't ask for "one hand raised" — Kontext will produce broken hand geometry. Generate a new hero with free hands if you need that pose.
+3. **Don't swap weapons.** The weapon type stays constant across frames. If you need the hero to switch from sword to bow, that's two different heroes, not an animation.
+4. **Don't mix topologies across frames.** Every frame is the same character in the same view/style. Frame 1 humanoid + frame 3 top-down doesn't work.
+5. **Don't animate limb count changes for amorphous subjects.** A slime with no arms can't suddenly grow arms in frame 3.
+
+## When to decline
+
+It's okay — and better — to refuse an animation request than to waste ~5 minutes generating garbage. Refusal cases:
+
+- **Hero body doesn't match requested action**: slime asked to walk, chest asked to attack, portrait asked to jump (no legs visible).
+- **Limb count changes required**: two-handed sword hero asked for a one-handed action where the other hand needs to be free.
+- **Camera-view flip required**: top-down asset asked for a side-view animation.
+- **Inanimate object asked for complex motion**: chest asked for an attack animation.
+
+Give the user a constructive alternative. *"That chibi slime doesn't have legs to walk with. I can do an idle bounce/pulse animation instead, or generate a new hero with visible legs for the walk cycle. Which would you like?"*
+
+## Frame count heuristics
+
+| Animation | Frames | Why |
+|---|---|---|
+| Idle loop | 4 | Subtle variation, short loop |
+| Attack | 6 | Windup → strike → recover |
+| Jump | 6 | Crouch → launch → air → peak → fall → land |
+| Walk cycle | 8 | Full gait cycle (2×4 phases) |
+| Run cycle | 8 | Same as walk but more extreme |
+| Cast/spell | 6 | Prep → channel → release → recover |
+| Death | 6 | Hit → stagger → fall → down |
+
+Don't ask for more than 8 frames unless the user explicitly wants cinematic — every frame is a ~30s warm generation, and the sprite sheet won't loop smoothly at high frame counts anyway.
+
+## Timing expectations
+
+- **Warm frame**: ~20–40s per frame. 8-frame walk cycle ≈ 3–5 minutes total.
+- **Cold start** (first frame after a break): +3–5 minutes one-time cost on the first frame.
+- **LoRA warm state doesn't matter for animate**: Kontext uses its own model, not the generate-path LoRA. A warm `pixel-indie` generate worker is NOT a warm animate worker.
+- Tell the user the expected time upfront.
 
 ## Retro pixel-art output
 
-Kontext produces smooth painterly frames by default. For classic-game sprite aesthetics, set `pixelate=True` on `animate_sprite`:
+Kontext produces smooth painterly 1024×1024 frames regardless of the hero's source style. If the hero was pixel art or the user wants retro output, enable pixelation:
 
-```python
+```
 animate_sprite(
     asset_id=hero_id,
-    animation="walk",
+    pose_prompts=[...],
     pixelate=True,
-    pixel_size=64,      # 64 classic, 32 Game Boy, 16 tile
-    palette_size=16,    # 16 classic NES/SNES, 8 Game Boy, 32 modern retro
+    pixel_size=64,
+    palette_size=16,
 )
 ```
 
-Each frame runs through a downsample → color-quantize → nearest-neighbor upsample pipeline after background removal. The result: crisp blocky pixels with a limited palette, ready for a retro game engine. Character identity is preserved (the pixel version is the same knight, just blocky). Use this whenever the hero was generated with `pixelate=True` OR the user's project is explicitly pixel-art style.
+Each frame runs through a downsample → color-quantize → nearest-neighbor upsample pipeline after background removal. Character identity is preserved across frames (same palette → same character).
 
-For best results the hero should be generated with `pixelate=True` too, so the hero and the animation share the same palette and grid resolution.
+**When to enable pixelate for animation:**
+- The hero was generated with `pixelate=True`
+- The hero was generated with `lora="pixel-indie"` or `lora="pixel-retro"`
+- The user's project is explicitly pixel-art style
 
-## Timing and cost
+## Tips
 
-- First frame on a cold endpoint: ~2-5 minutes (cold start dominated)
-- Subsequent frames on warm workers: ~20-40 seconds each
-- 8-frame walk cycle warm path: ~3-5 minutes total, ~$0.05-0.10
-
-Don't parallelize frame submissions. Sequential per-frame is more reliable and easier to debug than racing jobs against a warm-worker pool.
-
-## Tips for better results
-
-1. **Generate a clean, high-contrast hero**: busy or low-contrast hero sprites give Kontext less signal to lock onto. Detailed armor, bold cape color, clear silhouette = better preservation.
-
-2. **Use the preset that matches your intent**: if you want an idle loop, `"idle"` gives 4 subtle variations that will tween well. If you ask for `"walk"` on an idle character that makes no sense (e.g., a character with no legs), you'll get unpredictable results.
-
-3. **Pick ONE pose subject**: `custom_prompt` should describe ONE pose, not a sequence. For a sequence, use a preset or call multiple times.
-
-4. **Seed matters**: same seed across frames helps consistency. Different seeds per frame give more variation. The tool uses the same seed for all frames in a single call; change `seed` between calls if you want variety.
-
-5. **Animations won't magically have hands — Kontext can't add or remove limbs reliably**: if your hero has a two-handed sword, asking for "one hand raised" may produce weird hand geometry. Start with hero poses that have the limbs you'll need for the animation.
-
-## Hero design rules (this matters more than anything else)
-
-Kontext's character preservation is strong but not magical. It can change pose; it can't change body topology. The best animations come from heroes whose starting pose matches the limb usage of the target animation:
-
-- **Walk/run cycle**: hero must have clearly visible legs in a neutral standing pose. If the hero is cropped at the waist or sitting, walk cycles will look broken.
-- **Attack**: hero must have the weapon hand free and visible. A hero holding a weapon with both hands can still do an overhead swing but NOT a one-handed slash.
-- **Jump**: hero needs both legs visible and not obstructed by a cape/robe flowing over them.
-- **Cast**: hero needs at least one hand visible and free (not holding a weapon with both hands).
-- **Death**: hero needs a full body — death animations show collapse, which requires showing the whole body falling. A bust/portrait hero can't do death.
-
-**When in doubt, generate the hero with the animation in mind.** If the user asks for a walk cycle, prompt `generate_sprite` with `"standing knight facing forward, legs apart, longsword held in right hand"` rather than `"knight"`. The resulting hero will animate much better because its starting pose already supports the transformations Kontext needs to make.
-
-**Limb-count rule**: Kontext can SHIFT existing limbs but struggles to ADD new ones. If the hero has two hands on a sword, a "one hand raised" pose will produce awkward hand geometry. Generate the hero in the hand-configuration you'll need most often in the animation.
-
-**Weapon continuity**: the hero's weapon type must stay the same across frames (Kontext preserves it). You can't turn a longsword into a bow mid-animation.
+- **Seed consistency**: use the same `seed` across all frames in a call (tool does this automatically). Different seeds produce stylistic drift between frames.
+- **Start with a clear hero**: high-contrast heroes with bold silhouettes animate better. Muddy/low-contrast heroes give Kontext less signal to lock onto.
+- **Describe the POSE DELTA, not the character**: "Change the pose to walking forward" beats "A knight walking forward".
+- **Don't fear the preservation suffix**: the tool auto-appends it if you forget, so your pose prompts can be short and specific.
 
 ## What animate_sprite does NOT do
 
-- **Generate a new character from scratch** — use `generate_sprite` for that
-- **Animate unrelated subjects together** (two characters interacting)
-- **Produce frame-accurate walk cycles for pixel-perfect retro games** — the output is 1024×1024 smooth-shaded art that needs to be converted to pixels if you want a classic pixel-art look
-- **Add or remove visual elements** — Kontext preserves what's there; it doesn't invent
+- Generate new characters — use `generate_sprite` for that
+- Multi-character interactions
+- Pixel-perfect walk cycles for strict retro games (the 1024×1024 smooth output needs pixelation)
+- Add or remove visual elements to the hero
+- Animate unrelated subjects in a single call (one hero per call)
 
-If you need real-time generation, long-form character consistency across many scenes, or ControlNet-style skeletal pose control, those are separate pipelines. This tool is for the common case: "I have a hero sprite, give me 6-8 keyframes of them doing X."
+For real-time generation, skeletal pose control, or long-form scene consistency, those are separate pipelines. This tool is for: *"I have a hero sprite, give me 4-8 keyframes of them doing X, where X is compatible with their body topology."*
