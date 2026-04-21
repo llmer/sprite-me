@@ -35,6 +35,9 @@ walk*.png
 fresh_hero*.png
 kontext_*.png
 
+# But DO track bundled viewer examples
+!docs/examples/**/*.png
+
 # IDE
 .vscode/
 .idea/

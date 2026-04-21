@@ -1,0 +1,719 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>sprite-me &mdash; sprite animation viewer</title>
+<meta name="description" content="Preview and inspect sprite sheet animations. Drag a sprite sheet PNG to see it animate with playback controls.">
+<meta property="og:title" content="sprite-me viewer">
+<meta property="og:description" content="Preview sprite sheet animations with frame-by-frame controls, background toggles, and zoom.">
+<meta property="og:type" content="website">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎮</text></svg>">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #141420;
+  --bg-surface: #1c1c2e;
+  --bg-input: #16213e;
+  --border: #333;
+  --border-hover: #555;
+  --text: #e0e0e0;
+  --text-dim: #888;
+  --text-faint: #555;
+  --accent: #f0c040;
+  --accent-hover: #ffd966;
+  --accent-dim: rgba(240, 192, 64, 0.15);
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* --- Header / Branding --- */
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.8rem 1.2rem;
+  border-bottom: 1px solid var(--border);
+}
+.brand {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+.brand h1 {
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+.brand h1 .sm { color: var(--accent); }
+.brand h1 .rest { color: var(--text); }
+.brand .sep {
+  color: var(--text-faint);
+  font-weight: 400;
+}
+.brand .page-title {
+  color: var(--text-dim);
+  font-size: 0.8rem;
+  font-weight: 400;
+}
+.header-links {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+}
+.header-links a {
+  color: var(--text-dim);
+  text-decoration: none;
+  font-size: 0.75rem;
+  transition: color 0.15s;
+}
+.header-links a:hover { color: var(--accent); }
+.gh-link {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+.gh-link svg {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
+}
+
+/* --- Main layout --- */
+main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 0.8rem 1rem 1.2rem;
+  gap: 0.7rem;
+  max-width: 960px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+/* --- Examples gallery --- */
+#examples {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+#examples span {
+  font-size: 0.7rem;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.example-btn {
+  font-size: 0.75rem;
+  padding: 0.3rem 0.65rem;
+  border-radius: 100px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.example-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.example-btn.active {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* --- Drop zone --- */
+#drop-zone {
+  border: 2px dashed var(--border);
+  border-radius: 10px;
+  padding: 1.2rem;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s;
+  width: 100%;
+  position: relative;
+}
+#drop-zone.dragover {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+#drop-zone.loaded {
+  padding: 0.5rem 0.8rem;
+  border-style: solid;
+  border-color: var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+}
+#drop-zone p { color: var(--text-dim); font-size: 0.8rem; }
+#drop-zone .hint { font-size: 0.65rem; color: var(--text-faint); margin-top: 0.3rem; }
+#file-input { display: none; }
+
+/* --- Sheet options (inline in loaded drop zone) --- */
+#sheet-opts {
+  display: none;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.75rem;
+}
+#sheet-opts label { color: var(--text-dim); }
+#sheet-opts input[type="number"] {
+  width: 3rem;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  color: #fff;
+  border-radius: 4px;
+  padding: 0.2rem 0.35rem;
+  font-family: inherit;
+  font-size: 0.75rem;
+  text-align: center;
+}
+#btn-new {
+  display: none;
+  font-size: 0.7rem;
+  padding: 0.2rem 0.5rem;
+  color: var(--text-dim);
+  border-color: var(--border);
+}
+#btn-new:hover { color: var(--accent); border-color: var(--accent); }
+
+/* --- Preview area --- */
+#preview {
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+}
+
+#viewport {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  overflow: hidden;
+  min-height: 180px;
+  width: 100%;
+  max-height: 50vh;
+  border: 1px solid var(--border);
+}
+#viewport canvas {
+  image-rendering: pixelated;
+  image-rendering: -moz-crisp-edges;
+  image-rendering: crisp-edges;
+}
+
+/* Backgrounds */
+.bg-checker {
+  background-color: #222;
+  background-image:
+    linear-gradient(45deg, #2a2a2a 25%, transparent 25%),
+    linear-gradient(-45deg, #2a2a2a 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #2a2a2a 75%),
+    linear-gradient(-45deg, transparent 75%, #2a2a2a 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+}
+.bg-black { background: #000; }
+.bg-white { background: #fff; }
+.bg-green { background: #00b140; }
+
+/* --- Controls --- */
+.controls-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  justify-content: center;
+  font-size: 0.75rem;
+}
+
+button {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 5px;
+  padding: 0.3rem 0.6rem;
+  font-family: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+  line-height: 1;
+}
+button:hover { border-color: var(--border-hover); }
+button.active {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+#fps-slider {
+  width: 90px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+#frame-counter { color: var(--text-dim); min-width: 4.5rem; text-align: center; }
+#fps-display { color: var(--text-dim); min-width: 3.5rem; }
+
+.sep { color: var(--text-faint); }
+
+/* --- Shortcuts hint --- */
+#shortcuts {
+  font-size: 0.6rem;
+  color: var(--text-faint);
+  text-align: center;
+  letter-spacing: 0.02em;
+}
+#shortcuts kbd {
+  display: inline-block;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0 0.3rem;
+  font-family: inherit;
+  font-size: 0.6rem;
+  line-height: 1.5;
+}
+
+/* --- Filmstrip --- */
+#filmstrip {
+  display: none;
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 0.3rem 0;
+  gap: 3px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+#filmstrip canvas {
+  flex-shrink: 0;
+  border: 2px solid transparent;
+  border-radius: 3px;
+  cursor: pointer;
+  image-rendering: pixelated;
+  image-rendering: -moz-crisp-edges;
+  transition: border-color 0.12s;
+}
+#filmstrip canvas:hover { border-color: var(--border-hover); }
+#filmstrip canvas.active { border-color: var(--accent); }
+
+/* --- Footer --- */
+footer {
+  text-align: center;
+  padding: 0.6rem;
+  font-size: 0.6rem;
+  color: var(--text-faint);
+  border-top: 1px solid var(--border);
+}
+footer a { color: var(--text-dim); text-decoration: none; }
+footer a:hover { color: var(--accent); }
+
+/* --- Responsive --- */
+@media (max-width: 640px) {
+  header { flex-direction: column; gap: 0.3rem; }
+  .brand .sep, .brand .page-title { display: none; }
+  .controls-row { gap: 0.3rem; }
+  button { padding: 0.25rem 0.45rem; }
+  #shortcuts { display: none; }
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <h1><span class="sm">sprite</span><span class="rest">-me</span></h1>
+    <span class="sep">/</span>
+    <span class="page-title">viewer</span>
+  </div>
+  <div class="header-links">
+    <a href="https://github.com/llmer/sprite-me" class="gh-link" target="_blank" rel="noopener">
+      <svg viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+      GitHub
+    </a>
+  </div>
+</header>
+
+<main>
+  <div id="examples">
+    <span>examples</span>
+    <button class="example-btn active" data-src="examples/walk.png" data-frames="4" data-label="walk">walk (4f)</button>
+    <button class="example-btn" data-src="examples/attack.png" data-frames="6" data-label="attack">attack (6f)</button>
+    <button class="example-btn" data-src="examples/idle.png" data-frames="4" data-label="idle">idle (4f)</button>
+  </div>
+
+  <div id="drop-zone">
+    <p>drop your own sprite sheet PNG here</p>
+    <p class="hint">or click to browse &middot; drop multiple frame PNGs for individual mode</p>
+    <input type="file" id="file-input" accept="image/png,image/webp,image/gif" multiple>
+    <div id="sheet-opts">
+      <label>frames: <input type="number" id="frame-count" min="1" max="64" value="4"></label>
+    </div>
+    <button id="btn-new" title="Load a different sprite sheet">load new</button>
+  </div>
+
+  <section id="preview">
+    <div id="viewport" class="bg-checker">
+      <canvas id="anim-canvas"></canvas>
+    </div>
+
+    <div class="controls-row">
+      <button id="btn-prev" title="Previous frame">&laquo;</button>
+      <button id="btn-play" title="Play / Pause">&#9654;</button>
+      <button id="btn-next" title="Next frame">&raquo;</button>
+      <span id="frame-counter">0 / 0</span>
+      <span class="sep">&middot;</span>
+      <input type="range" id="fps-slider" min="1" max="30" value="8">
+      <span id="fps-display">8 fps</span>
+    </div>
+
+    <div class="controls-row">
+      <button class="bg-btn active" data-bg="checker">checker</button>
+      <button class="bg-btn" data-bg="black">black</button>
+      <button class="bg-btn" data-bg="white">white</button>
+      <button class="bg-btn" data-bg="green">green</button>
+      <span class="sep">&middot;</span>
+      <button id="btn-zoom-out">&minus;</button>
+      <span id="zoom-display" style="min-width:2.2rem; text-align:center; color:var(--text-dim)">1x</span>
+      <button id="btn-zoom-in">+</button>
+      <button id="btn-zoom-fit">fit</button>
+    </div>
+
+    <div id="shortcuts">
+      <kbd>Space</kbd> play/pause &nbsp; <kbd>&larr;</kbd><kbd>&rarr;</kbd> step &nbsp; <kbd>R</kbd> reset
+    </div>
+  </section>
+
+  <div id="filmstrip"></div>
+</main>
+
+<footer>
+  <a href="https://github.com/llmer/sprite-me" target="_blank" rel="noopener">sprite-me</a>
+  &mdash; agent-first pixel art sprite generator
+</footer>
+
+<script>
+class SpriteAnimator {
+  constructor(canvas, filmstrip) {
+    this.canvas = canvas;
+    this.ctx = canvas.getContext('2d');
+    this.filmstrip = filmstrip;
+    this.frames = [];
+    this.currentFrame = 0;
+    this.fps = 8;
+    this.playing = false;
+    this.zoom = 1;
+    this.frameWidth = 0;
+    this.frameHeight = 0;
+    this.rafId = null;
+    this.lastTime = 0;
+  }
+
+  autoDetectFrameCount(img) {
+    if (img.height === 0) return 1;
+    return Math.max(1, Math.min(64, Math.round(img.width / img.height)));
+  }
+
+  async loadSpriteSheet(img, frameCount) {
+    this.reset();
+    frameCount = Math.max(1, frameCount);
+    this.frameWidth = Math.floor(img.width / frameCount);
+    this.frameHeight = img.height;
+
+    for (let i = 0; i < frameCount; i++) {
+      const off = new OffscreenCanvas(this.frameWidth, this.frameHeight);
+      const c = off.getContext('2d');
+      c.drawImage(img, i * this.frameWidth, 0, this.frameWidth, this.frameHeight, 0, 0, this.frameWidth, this.frameHeight);
+      this.frames.push(await createImageBitmap(off));
+    }
+
+    this.setupCanvas();
+    this.renderFilmstrip();
+    this.drawCurrentFrame();
+  }
+
+  async loadIndividualFrames(files) {
+    this.reset();
+    const sorted = Array.from(files).sort((a, b) => a.name.localeCompare(b.name, 'en', { numeric: true }));
+    for (const file of sorted) {
+      this.frames.push(await createImageBitmap(await file.arrayBuffer().then(b => new Blob([b]))));
+    }
+    if (!this.frames.length) return;
+    this.frameWidth = this.frames[0].width;
+    this.frameHeight = this.frames[0].height;
+    this.setupCanvas();
+    this.renderFilmstrip();
+    this.drawCurrentFrame();
+  }
+
+  setupCanvas() {
+    this.canvas.width = this.frameWidth;
+    this.canvas.height = this.frameHeight;
+    this.applyZoom();
+  }
+
+  drawCurrentFrame() {
+    if (!this.frames.length) return;
+    this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    this.ctx.drawImage(this.frames[this.currentFrame], 0, 0);
+    this.updateFrameCounter();
+    this.updateFilmstripHighlight();
+  }
+
+  renderFilmstrip() {
+    this.filmstrip.innerHTML = '';
+    this.filmstrip.style.display = 'flex';
+    const h = 72;
+    this.frames.forEach((frame, i) => {
+      const r = frame.width / frame.height;
+      const w = Math.round(h * r);
+      const c = document.createElement('canvas');
+      c.width = w; c.height = h;
+      c.style.width = w + 'px'; c.style.height = h + 'px';
+      c.getContext('2d').drawImage(frame, 0, 0, w, h);
+      c.addEventListener('click', () => { this.currentFrame = i; this.drawCurrentFrame(); });
+      this.filmstrip.appendChild(c);
+    });
+  }
+
+  updateFilmstripHighlight() {
+    this.filmstrip.querySelectorAll('canvas').forEach((c, i) => c.classList.toggle('active', i === this.currentFrame));
+  }
+
+  updateFrameCounter() {
+    document.getElementById('frame-counter').textContent = `${this.currentFrame + 1} / ${this.frames.length}`;
+  }
+
+  play() {
+    if (this.frames.length < 2) return;
+    this.playing = true;
+    this.lastTime = 0;
+    document.getElementById('btn-play').innerHTML = '&#9646;&#9646;';
+    this.tick(0);
+  }
+
+  pause() {
+    this.playing = false;
+    document.getElementById('btn-play').innerHTML = '&#9654;';
+    if (this.rafId) cancelAnimationFrame(this.rafId);
+    this.rafId = null;
+  }
+
+  togglePlayPause() { this.playing ? this.pause() : this.play(); }
+
+  stepForward() {
+    if (!this.frames.length) return;
+    this.currentFrame = (this.currentFrame + 1) % this.frames.length;
+    this.drawCurrentFrame();
+  }
+
+  stepBackward() {
+    if (!this.frames.length) return;
+    this.currentFrame = (this.currentFrame - 1 + this.frames.length) % this.frames.length;
+    this.drawCurrentFrame();
+  }
+
+  setFPS(fps) {
+    this.fps = Math.max(1, Math.min(30, fps));
+    document.getElementById('fps-display').textContent = this.fps + ' fps';
+  }
+
+  tick(ts) {
+    if (!this.playing) return;
+    this.rafId = requestAnimationFrame(t => this.tick(t));
+    if (!this.lastTime) { this.lastTime = ts; return; }
+    if (ts - this.lastTime >= 1000 / this.fps) {
+      this.lastTime = ts;
+      this.currentFrame = (this.currentFrame + 1) % this.frames.length;
+      this.drawCurrentFrame();
+    }
+  }
+
+  setZoom(level) {
+    this.zoom = Math.max(0.5, Math.min(8, level));
+    this.applyZoom();
+    document.getElementById('zoom-display').textContent =
+      (this.zoom === Math.floor(this.zoom) ? this.zoom : this.zoom.toFixed(1)) + 'x';
+  }
+
+  applyZoom() {
+    const vp = document.getElementById('viewport');
+    const maxW = vp.clientWidth - 16;
+    const maxH = window.innerHeight * 0.45;
+    this.canvas.style.width = Math.min(this.frameWidth * this.zoom, maxW) + 'px';
+    this.canvas.style.height = Math.min(this.frameHeight * this.zoom, maxH) + 'px';
+  }
+
+  fitZoom() {
+    if (!this.frameWidth) return;
+    const vp = document.getElementById('viewport');
+    const s = Math.min((vp.clientWidth - 16) / this.frameWidth, (window.innerHeight * 0.45) / this.frameHeight);
+    this.setZoom(Math.round(s * 2) / 2);
+  }
+
+  reset() {
+    this.pause();
+    this.frames.forEach(f => f.close?.());
+    this.frames = [];
+    this.currentFrame = 0;
+    this.frameWidth = 0;
+    this.frameHeight = 0;
+  }
+}
+
+// --- Init ---
+const canvas = document.getElementById('anim-canvas');
+const filmstrip = document.getElementById('filmstrip');
+const animator = new SpriteAnimator(canvas, filmstrip);
+
+let currentSheetImage = null;
+const dropZone = document.getElementById('drop-zone');
+const fileInput = document.getElementById('file-input');
+const frameCountInput = document.getElementById('frame-count');
+const sheetOpts = document.getElementById('sheet-opts');
+const preview = document.getElementById('preview');
+const btnNew = document.getElementById('btn-new');
+
+function showPreview() {
+  preview.style.display = 'flex';
+  dropZone.classList.add('loaded');
+  btnNew.style.display = 'inline-block';
+}
+
+function resetViewer() {
+  animator.reset();
+  preview.style.display = 'none';
+  filmstrip.style.display = 'none';
+  filmstrip.innerHTML = '';
+  dropZone.classList.remove('loaded');
+  sheetOpts.style.display = 'none';
+  btnNew.style.display = 'none';
+  currentSheetImage = null;
+  document.querySelectorAll('.example-btn').forEach(b => b.classList.remove('active'));
+}
+
+// --- File loading ---
+function handleFiles(files) {
+  if (!files.length) return;
+  document.querySelectorAll('.example-btn').forEach(b => b.classList.remove('active'));
+
+  if (files.length === 1 && files[0].type.startsWith('image/')) {
+    const img = new Image();
+    img.onload = async () => {
+      currentSheetImage = img;
+      const count = animator.autoDetectFrameCount(img);
+      frameCountInput.value = count;
+      sheetOpts.style.display = 'flex';
+      showPreview();
+      await animator.loadSpriteSheet(img, count);
+      animator.fitZoom();
+      animator.play();
+    };
+    img.src = URL.createObjectURL(files[0]);
+  } else {
+    sheetOpts.style.display = 'none';
+    showPreview();
+    currentSheetImage = null;
+    animator.loadIndividualFrames(files).then(() => {
+      animator.fitZoom();
+      animator.play();
+    });
+  }
+}
+
+// --- Example loading ---
+function loadExample(src, frameCount) {
+  const img = new Image();
+  img.onload = async () => {
+    currentSheetImage = img;
+    frameCountInput.value = frameCount;
+    sheetOpts.style.display = 'flex';
+    showPreview();
+    await animator.loadSpriteSheet(img, frameCount);
+    animator.fitZoom();
+    animator.play();
+  };
+  img.src = src;
+}
+
+document.querySelectorAll('.example-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.example-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    loadExample(btn.dataset.src, parseInt(btn.dataset.frames, 10));
+  });
+});
+
+// Load walk example on page init
+loadExample('examples/walk.png', 4);
+
+// --- Drop & file input ---
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+dropZone.addEventListener('drop', e => { e.preventDefault(); dropZone.classList.remove('dragover'); handleFiles(e.dataTransfer.files); });
+dropZone.addEventListener('click', e => { if (e.target.tagName !== 'BUTTON' && e.target.tagName !== 'INPUT') fileInput.click(); });
+fileInput.addEventListener('change', () => handleFiles(fileInput.files));
+
+// Re-split
+frameCountInput.addEventListener('input', async () => {
+  if (!currentSheetImage) return;
+  const count = parseInt(frameCountInput.value, 10);
+  if (count > 0 && count <= 64) {
+    await animator.loadSpriteSheet(currentSheetImage, count);
+    animator.fitZoom();
+  }
+});
+
+// Reset
+btnNew.addEventListener('click', e => { e.stopPropagation(); resetViewer(); });
+
+// --- Controls ---
+document.getElementById('btn-play').addEventListener('click', () => animator.togglePlayPause());
+document.getElementById('btn-prev').addEventListener('click', () => animator.stepBackward());
+document.getElementById('btn-next').addEventListener('click', () => animator.stepForward());
+
+const fpsSlider = document.getElementById('fps-slider');
+fpsSlider.addEventListener('input', () => animator.setFPS(parseInt(fpsSlider.value, 10)));
+
+// Keyboard
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return;
+  if (e.code === 'Space') { e.preventDefault(); animator.togglePlayPause(); }
+  if (e.code === 'ArrowRight') { e.preventDefault(); animator.stepForward(); }
+  if (e.code === 'ArrowLeft') { e.preventDefault(); animator.stepBackward(); }
+  if (e.code === 'KeyR') { e.preventDefault(); resetViewer(); }
+});
+
+// Background
+document.querySelectorAll('.bg-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.bg-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('viewport').className = 'bg-' + btn.dataset.bg;
+  });
+});
+
+// Zoom
+document.getElementById('btn-zoom-in').addEventListener('click', () => animator.setZoom(animator.zoom + 0.5));
+document.getElementById('btn-zoom-out').addEventListener('click', () => animator.setZoom(animator.zoom - 0.5));
+document.getElementById('btn-zoom-fit').addEventListener('click', () => animator.fitZoom());
+
+window.addEventListener('resize', () => { if (animator.frames.length) animator.applyZoom(); });
+</script>
+</body>
+</html>
