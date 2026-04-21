@@ -15,14 +15,21 @@
 # Expected volume layout:
 #   /runpod-volume/models/
 #     checkpoints/flux1-dev-fp8.safetensors
+#     checkpoints/toonyou_beta6.safetensors         (SD1.5, for AnimateDiff)
 #     diffusion_models/flux1-dev-kontext_fp8_scaled.safetensors
 #     loras/flux-2d-game-assets.safetensors
 #     text_encoders/clip_l.safetensors
 #     text_encoders/t5xxl_fp8_e4m3fn.safetensors
 #     vae/ae.safetensors
+#     animatediff_models/v3_sd15_mm.ckpt            (AnimateDiff motion)
+#     ipadapter/ip-adapter-plus_sd15.safetensors    (IP-Adapter SD1.5)
+#     clip_vision/CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors  (IPA encoder)
 
 sprite_me:
   base_path: /runpod-volume/models/
+  animatediff_models: |
+    animatediff_models/
+    animatediff_motion/
   checkpoints: checkpoints/
   clip_vision: clip_vision/
   configs: configs/
@@ -31,6 +38,7 @@ sprite_me:
     diffusion_models/
     unet/
   embeddings: embeddings/
+  ipadapter: ipadapter/
   loras: loras/
   text_encoders: |
     text_encoders/

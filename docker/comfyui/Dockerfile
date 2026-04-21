@@ -15,6 +15,24 @@
 
 FROM runpod/worker-comfyui:5.8.5-flux1-dev-fp8
 
+# Custom nodes for the AnimateDiff + IP-Adapter animation path (v0.6.0).
+#   - AnimateDiff-Evolved: the maintained ComfyUI port of AnimateDiff,
+#     provides ADE_LoadAnimateDiffModel / ADE_UseEvolvedSampling / etc.
+#   - IPAdapter-plus: cubiq's IP-Adapter node pack, provides
+#     IPAdapterUnifiedLoader / IPAdapterAdvanced for reference-image
+#     conditioning that preserves hero identity across AnimateDiff frames.
+# TODO: pin to specific commits once the first successful build confirms
+# node compatibility. For now, tracking main — reproducibility caveat.
+RUN set -eux; \
+    cd /comfyui/custom_nodes; \
+    git clone --depth 1 https://github.com/Kosinkadink/ComfyUI-AnimateDiff-Evolved.git; \
+    git clone --depth 1 https://github.com/cubiq/ComfyUI_IPAdapter_plus.git; \
+    for d in ComfyUI-AnimateDiff-Evolved ComfyUI_IPAdapter_plus; do \
+      if [ -f "$d/requirements.txt" ]; then \
+        pip install --no-cache-dir -r "$d/requirements.txt"; \
+      fi; \
+    done
+
 # Tell ComfyUI to ALSO read models from the mounted network volume.
 # We inherit the upstream CMD ["/start.sh"] and WORKDIR /comfyui — no
 # entrypoint override (attempt with a custom entrypoint.sh broke ComfyUI

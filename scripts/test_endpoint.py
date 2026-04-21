@@ -35,6 +35,7 @@ sys.path.insert(0, str(_REPO_ROOT / "src"))
 from sprite_me.inference.runpod_client import RunPodClient, RunPodError  # noqa: E402
 from sprite_me.inference.workflow_builder import (  # noqa: E402
     build_animate_workflow,
+    build_animate_workflow_animatediff,
     build_generate_workflow,
 )
 from sprite_me.loras import DEFAULT_LORA, LORAS  # noqa: E402
@@ -97,9 +98,49 @@ def _parse_args() -> argparse.Namespace:
         help="[animate] Disable frame chaining (always reference the hero)",
     )
     p.add_argument(
+        "--anchor-frame",
+        action="store_true",
+        help="[animate] Frame 0 references hero; frames 1..N reference "
+             "frame 0's output. Bounds VAE drift to one round-trip. "
+             "Overrides --no-chain.",
+    )
+    p.add_argument(
         "--seed-per-frame",
         action="store_true",
         help="[animate] Increment seed per frame (more RNG variation)",
+    )
+    # AnimateDiff-mode flags (v0.6 path)
+    p.add_argument(
+        "--animatediff",
+        action="store_true",
+        help="[animate] Use the SD1.5 + AnimateDiff v3 + IP-Adapter workflow "
+             "instead of the Kontext path. Requires --reference-asset and "
+             "--motion-description.",
+    )
+    p.add_argument(
+        "--motion-description",
+        help="[animatediff] Single motion prompt for the whole sequence, "
+             "e.g. 'a knight swinging a sword in a side-view attack, game "
+             "sprite animation'. Required when --animatediff is set.",
+    )
+    p.add_argument(
+        "--frame-count",
+        type=int,
+        default=16,
+        help="[animatediff] Number of frames to sample in one AnimateDiff "
+             "batch. Default 16 (native v3 context length).",
+    )
+    p.add_argument(
+        "--ipa-weight",
+        type=float,
+        default=0.75,
+        help="[animatediff] IP-Adapter identity-conditioning weight (0.0-1.0+). "
+             "Higher = tighter hero identity, looser motion. Default 0.75.",
+    )
+    p.add_argument(
+        "--ad-checkpoint",
+        default="toonyou_beta6.safetensors",
+        help="[animatediff] SD1.5 checkpoint filename under checkpoints/.",
     )
     return p.parse_args()
 
@@ -152,6 +193,54 @@ async def _generate_animate_frame(
     return images[0] if images else None
 
 
+async def run_animatediff(args: argparse.Namespace, client: RunPodClient) -> list[bytes]:
+    """Single-shot AnimateDiff + IP-Adapter batch. Returns N frames in one submit."""
+    if not args.reference_asset:
+        raise ValueError("--animatediff requires --reference-asset <path-to-hero-png>")
+    if not args.motion_description:
+        raise ValueError("--animatediff requires --motion-description \"<prompt>\"")
+    hero_path = _REPO_ROOT / args.reference_asset if not Path(args.reference_asset).is_absolute() else Path(args.reference_asset)
+    if not hero_path.exists():
+        raise FileNotFoundError(f"Hero PNG not found: {hero_path}")
+
+    hero_bytes = hero_path.read_bytes()
+    hero_b64 = base64.b64encode(hero_bytes).decode()
+    print(f"Hero: {hero_path} ({len(hero_bytes)} bytes)")
+    print(
+        f"Motion: '{args.motion_description}' | frames: {args.frame_count} "
+        f"| ipa_weight: {args.ipa_weight} | ckpt: {args.ad_checkpoint}"
+    )
+
+    workflow = build_animate_workflow_animatediff(
+        motion_prompt=args.motion_description,
+        reference_image_name="hero.png",
+        checkpoint=args.ad_checkpoint,
+        ipadapter_weight=args.ipa_weight,
+        width=args.width,
+        height=args.height,
+        frames=args.frame_count,
+        seed=args.seed,
+        steps=args.steps,
+    )
+    t = time.time()
+    resp = await client.client.post(
+        f"{client.base_url}/run",
+        json={
+            "input": {
+                "workflow": workflow,
+                "images": [{"name": "hero.png", "image": hero_b64}],
+            }
+        },
+    )
+    resp.raise_for_status()
+    job_id = resp.json()["id"]
+    print(f"  submitted {job_id}, waiting...")
+    payload = await client.wait_for_result(job_id)
+    frames = RunPodClient._extract_images(payload.get("output", {}))
+    print(f"  done in {time.time() - t:.1f}s, got {len(frames)} frame(s)")
+    return frames
+
+
 async def run_animate(args: argparse.Namespace, client: RunPodClient) -> list[bytes]:
     if not args.reference_asset:
         raise ValueError("--animate requires --reference-asset <path-to-hero-png>")
@@ -172,10 +261,12 @@ async def run_animate(args: argparse.Namespace, client: RunPodClient) -> list[by
             raise ValueError("--pose-prompts must be a JSON list of strings")
     else:
         pose_prompts = [args.prompt]
-    chain = not args.no_chain
-    print(f"Frames: {len(pose_prompts)} | denoise: {args.denoise} | chain: {chain} | seed-per-frame: {args.seed_per_frame}")
+    chain = not args.no_chain and not args.anchor_frame
+    mode = "anchor-frame" if args.anchor_frame else ("chain" if chain else "no-chain")
+    print(f"Frames: {len(pose_prompts)} | denoise: {args.denoise} | mode: {mode} | seed-per-frame: {args.seed_per_frame}")
 
     current_ref_b64 = hero_b64
+    anchor_ref_b64: str | None = None
     frames: list[bytes] = []
     _preservation = (
         "Keep the exact same character, clothing, armor, weapon, "
@@ -197,6 +288,9 @@ async def run_animate(args: argparse.Namespace, client: RunPodClient) -> list[by
         frames.append(frame)
         if chain:
             current_ref_b64 = base64.b64encode(frame).decode()
+        elif args.anchor_frame and i == 0:
+            anchor_ref_b64 = base64.b64encode(frame).decode()
+            current_ref_b64 = anchor_ref_b64
         print(f"    done in {time.time()-t:.1f}s ({len(frame)} bytes)")
     return frames
 
@@ -210,14 +304,21 @@ async def main() -> int:
         return 1
 
     print(f"Endpoint: {client.endpoint_id}")
-    mode = "animate" if args.animate else "generate"
+    if args.animatediff:
+        mode = "animatediff"
+    elif args.animate:
+        mode = "animate"
+    else:
+        mode = "generate"
     print(
         f"Mode: {mode} | seed={args.seed} steps={args.steps} "
         f"guidance={args.guidance}"
     )
     t0 = time.time()
     try:
-        if args.animate:
+        if args.animatediff:
+            images = await run_animatediff(args, client)
+        elif args.animate:
             images = await run_animate(args, client)
         else:
             print(f"prompt='{args.prompt}' {args.width}x{args.height} lora_strength={args.lora_strength}")
@@ -236,7 +337,8 @@ async def main() -> int:
         return 3
 
     out = _REPO_ROOT / args.out
-    if args.animate and len(images) > 1:
+    multi_frame = (args.animate or args.animatediff) and len(images) > 1
+    if multi_frame:
         stem = out.stem
         for i, frame_data in enumerate(images):
             (_REPO_ROOT / f"{stem}_frame{i:02d}.png").write_bytes(frame_data)
