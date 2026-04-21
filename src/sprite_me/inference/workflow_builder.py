@@ -213,17 +213,28 @@ def build_animate_workflow(
     }
 
 
+_DEFAULT_AD_LORAS: tuple[tuple[str, float, float], ...] = ()
+# Empirical finding (v0.6.0 smoke tests): loading ANY LoRA into the UNet
+# before the AnimateDiff motion wrapping dampens inter-frame motion by ~7x
+# (50 -> 7 mean pixel diff across the 16-frame batch). Specifically tested:
+# v3_sd15_adapter, PixelArtRedmond, combinations at various strengths.
+# Default stack is empty; callers who want a pixel-art look should use the
+# post-pixelate step in test_endpoint.py / animate_sprite instead, which
+# doesn't interfere with the motion module.
+
+
 def build_animate_workflow_animatediff(
     motion_prompt: str,
     reference_image_name: str = "hero.png",
     checkpoint: str = "toonyou_beta6.safetensors",
-    motion_module: str = "v3_sd15_mm.ckpt",
+    motion_module: str = "mm_sd_v15_v2.ckpt",
+    loras: tuple[tuple[str, float, float], ...] = _DEFAULT_AD_LORAS,
     ipadapter_preset: str = "PLUS (high strength)",
-    ipadapter_weight: float = 0.75,
+    ipadapter_weight: float = 0.0,
     ipadapter_end_at: float = 1.0,
     negative_prompt: str = (
         "blurry, low quality, watermark, text, photograph, realistic, "
-        "extra limbs, deformed, bad anatomy, ugly"
+        "extra limbs, deformed, bad anatomy, ugly, static, frozen, still"
     ),
     width: int = 512,
     height: int = 512,
@@ -234,67 +245,107 @@ def build_animate_workflow_animatediff(
     sampler_name: str = "euler",
     scheduler: str = "normal",
 ) -> dict[str, Any]:
-    """Build a SD1.5 + AnimateDiff v3 + IP-Adapter animation workflow.
+    """Build a SD1.5 + AnimateDiff v2 + (optional) IP-Adapter animation graph.
 
-    Replaces the single-frame Kontext path for `animate_sprite` as of v0.6.
-    Character identity flows from the hero image via IP-Adapter's CLIP Vision
-    conditioning (not from text-prompt engineering or ReferenceLatent).
-    Temporal coherence is owned by the AnimateDiff motion module, which
-    jointly denoises a 16-frame latent batch so poses morph smoothly between
-    frames rather than being re-invented per call.
+    Replaces the Kontext path for `animate_sprite` as of v0.6. Motion comes
+    from the AnimateDiff motion module, which jointly denoises a 16-frame
+    latent batch so poses evolve coherently across the sequence.
+
+    Empirical tuning notes (v0.6.0 session):
+
+    - **mm_sd_v15_v2 > v3 for motion**. The v3 motion module produces much
+      subtler motion on this worker image. v2 gives ~40 mean-pixel-diff
+      across the batch; v3 gives ~5. Default is v2.
+    - **LoRAs kill motion.** Any LoraLoader between the checkpoint and the
+      AnimateDiff wrap dampens motion by ~7x (tested: v3_sd15_adapter,
+      PixelArtRedmond, various strengths). Default `loras=()`. Pixel-art
+      styling should come from the post-generation pixelate step, not from
+      a pixel-art LoRA inside the graph.
+    - **IP-Adapter at any weight ≥ 0.1 freezes motion.** The image-prompt
+      conditioning dominates cross-attention and the motion module can't
+      modulate pose. Default `ipadapter_weight=0.0` (disables conditioning;
+      graph still wires the nodes so callers can raise it per-call).
+      Character identity comes from text prompt, not reference image.
 
     Node graph:
         CheckpointLoaderSimple (SD1.5)
-            └── IPAdapterUnifiedLoader (loads ipadapter + CLIP Vision)
-                └── IPAdapterAdvanced (hero image -> model conditioning)
-                    └── ADE_LoadAnimateDiffModel (motion module)
-                        └── ADE_UseEvolvedSampling (wraps model for batched
-                            temporal sampling)
-                                └── KSampler (latent_image = empty 16-frame
-                                    SD1.5 batch) -> VAEDecode -> SaveImage
+            └── [optional LoraLoader chain]
+                └── IPAdapterUnifiedLoader
+                    └── IPAdapterAdvanced (weight=0.0 by default — pass-through)
+                        └── ADE_UseEvolvedSampling (wraps model with motion)
+                            ← ADE_ApplyAnimateDiffModelSimple ← ADE_LoadAnimateDiffModel
+                        └── KSampler (16-frame latent batch)
+                            → VAEDecode → SaveImage
 
     The hero PNG must be uploaded as an "images" entry in the /run payload
     so the runpod-worker-comfyui handler writes it to /comfyui/input/
-    before the workflow runs (same mechanism as the Kontext path).
+    before the workflow runs (same mechanism as the Kontext path). It is
+    referenced by IP-Adapter when `ipadapter_weight > 0`; otherwise
+    unused.
 
     Args:
-        motion_prompt: Natural-language description of the whole animation
-            (e.g. "a knight swinging a sword in a side-view attack, game
-            sprite animation"). AnimateDiff takes ONE prompt for the whole
-            sequence, not per-frame — motion emerges from the motion module,
-            not from prompt variation.
+        motion_prompt: Natural-language description of the whole animation.
+            Keep it short and motion-focused ("knight swinging sword, action
+            animation, side view") — verbose prompts over-specify the scene
+            and dampen motion. ONE prompt covers all frames; motion emerges
+            from the motion module, not prompt variation.
         reference_image_name: Filename of the hero PNG in /comfyui/input/.
+            Only used when ipadapter_weight > 0.
         checkpoint: SD1.5 base model on the volume under checkpoints/.
-            Default toonyou_beta6 matches sprite-me's cartoon/indie aesthetic.
+            Default toonyou_beta6 matches sprite-me's cartoon/indie aesthetic
+            well after post-pixelation.
         motion_module: AnimateDiff motion module filename under
-            animatediff_models/. v3_sd15_mm is the current v3 SD1.5 default.
-        ipadapter_preset: IPAdapterUnifiedLoader preset name. "PLUS (high
-            strength)" uses ip-adapter-plus_sd15 which gives strong identity
-            preservation; drop to "STANDARD" for looser conditioning.
-        ipadapter_weight: Identity-conditioning strength (0.0-1.0+). 0.75 is
-            a good sprite default — strong enough to lock character, loose
-            enough to let motion register.
-        width, height: Frame dimensions. SD1.5 native is 512x512; going
-            higher increases VRAM + time non-linearly.
-        frames: Batch size for the motion module. 16 is the v3 training
-            context. The caller can trim this down post-generation.
+            animatediff_models/. mm_sd_v15_v2 is the current default (see
+            note above).
+        loras: Tuple of (filename, model_strength, clip_strength) triples.
+            Default empty; see note above on motion dampening.
+        ipadapter_preset: IPAdapterUnifiedLoader preset name.
+        ipadapter_weight: 0.0 (default) disables reference-image conditioning
+            — strongly recommended for motion. Set to 0.1-0.3 only if you
+            genuinely need some identity anchoring and accept the motion hit.
+        ipadapter_end_at: Sampling fraction at which to stop IP-Adapter
+            conditioning. Ignored when weight == 0.
+        width, height: Frame dimensions. SD1.5 native is 512x512.
+        frames: Batch size for the motion module. 16 is the v2 training
+            context length.
         seed: KSampler seed — same seed each call for reproducibility.
-        steps: Denoising steps. 25 is a sane SD1.5 default; drop to 20 if
-            time-bound.
-        cfg: Guidance scale. 7.5 is SD1.5 canonical; IP-Adapter at weight
-            0.75 will compete with text, so don't drop below 6.
+        steps: Denoising steps. 25 is a sane SD1.5 default.
+        cfg: Guidance scale. 7.5 is SD1.5 canonical.
         sampler_name, scheduler: KSampler config. euler/normal is the
-            community default for AnimateDiff v3 and works without tuning.
+            community default and works without tuning.
     """
-    return {
+    # Build the LoRA chain dynamically so callers can compose stacks without
+    # us baking a fixed node count. Each LoraLoader takes model+clip, returns
+    # updated model+clip, and feeds the next loader. The final model+clip go
+    # to IPAdapter and the text encoders respectively.
+    nodes: dict[str, Any] = {
         "1": {
             "class_type": "CheckpointLoaderSimple",
             "inputs": {"ckpt_name": checkpoint},
         },
+    }
+    prev_model: list[Any] = ["1", 0]
+    prev_clip: list[Any] = ["1", 1]
+    for idx, (lora_name, s_model, s_clip) in enumerate(loras):
+        node_id = f"1_lora{idx}"
+        nodes[node_id] = {
+            "class_type": "LoraLoader",
+            "inputs": {
+                "lora_name": lora_name,
+                "strength_model": s_model,
+                "strength_clip": s_clip,
+                "model": prev_model,
+                "clip": prev_clip,
+            },
+        }
+        prev_model = [node_id, 0]
+        prev_clip = [node_id, 1]
+
+    nodes.update({
         "2": {
             "class_type": "IPAdapterUnifiedLoader",
             "inputs": {
-                "model": ["1", 0],
+                "model": prev_model,
                 "preset": ipadapter_preset,
             },
         },
@@ -337,11 +388,11 @@ def build_animate_workflow_animatediff(
         },
         "7": {
             "class_type": "CLIPTextEncode",
-            "inputs": {"text": motion_prompt, "clip": ["1", 1]},
+            "inputs": {"text": motion_prompt, "clip": prev_clip},
         },
         "8": {
             "class_type": "CLIPTextEncode",
-            "inputs": {"text": negative_prompt, "clip": ["1", 1]},
+            "inputs": {"text": negative_prompt, "clip": prev_clip},
         },
         "9": {
             "class_type": "EmptyLatentImage",
@@ -370,7 +421,8 @@ def build_animate_workflow_animatediff(
             "class_type": "SaveImage",
             "inputs": {"images": ["11", 0], "filename_prefix": "sprite-me-animatediff"},
         },
-    }
+    })
+    return nodes
 
 
 def build_remove_background_workflow(image_b64: str) -> dict[str, Any]:

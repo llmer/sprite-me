@@ -64,6 +64,30 @@ ANIMATEDIFF_ASSETS: dict[str, AnimateDiffAsset] = {
         expected_size_mb=1670,
         description="AnimateDiff v3 motion module for SD1.5",
     ),
+    "animatediff_v2_mm": AnimateDiffAsset(
+        name="mm_sd_v15_v2.ckpt",
+        remote_prefix="animatediff_models",
+        local_subdir="animatediff_models",
+        source_url=(
+            "https://huggingface.co/guoyww/animatediff/resolve/main/"
+            "mm_sd_v15_v2.ckpt"
+        ),
+        expected_size_mb=1820,
+        description="AnimateDiff v2 motion module — older but community "
+                    "consensus is visibly stronger motion than v3",
+    ),
+    "animatediff_lora_zoomout": AnimateDiffAsset(
+        name="v2_lora_ZoomOut.ckpt",
+        remote_prefix="loras",
+        local_subdir="loras",
+        source_url=(
+            "https://huggingface.co/guoyww/animatediff/resolve/main/"
+            "v2_lora_ZoomOut.ckpt"
+        ),
+        expected_size_mb=78,
+        description="AnimateDiff v2 motion LoRA — forces zoom-out camera "
+                    "motion. Use as diagnostic to prove motion is reachable.",
+    ),
     "ipadapter_plus_sd15": AnimateDiffAsset(
         name="ip-adapter-plus_sd15.safetensors",
         remote_prefix="ipadapter",
@@ -87,5 +111,31 @@ ANIMATEDIFF_ASSETS: dict[str, AnimateDiffAsset] = {
         ),
         expected_size_mb=2500,
         description="CLIP Vision H/14 — image encoder for IP-Adapter Plus SD1.5",
+    ),
+    # Motion + style LoRAs (both load through the standard SD1.5 LoraLoader):
+    "animatediff_v3_adapter": AnimateDiffAsset(
+        name="v3_sd15_adapter.ckpt",
+        remote_prefix="loras",
+        local_subdir="loras",
+        source_url=(
+            "https://huggingface.co/guoyww/animatediff/resolve/main/"
+            "v3_sd15_adapter.ckpt"
+        ),
+        expected_size_mb=102,
+        description="v3 domain adapter LoRA — author-recommended companion "
+                    "to mm_sd15_v3 for stronger motion",
+    ),
+    "pixelart_redmond_sd15": AnimateDiffAsset(
+        name="PixelArtRedmond15V-PixelArt-PIXARFK.safetensors",
+        remote_prefix="loras",
+        local_subdir="loras",
+        source_url=(
+            "https://huggingface.co/artificialguybr/"
+            "pixelartredmond-1-5v-pixel-art-loras-for-sd-1-5/resolve/main/"
+            "PixelArtRedmond15V-PixelArt-PIXARFK.safetensors"
+        ),
+        expected_size_mb=28,
+        description="SD1.5 pixel-art LoRA — pushes ToonYou output toward "
+                    "sprite-compatible pixel aesthetics before post-pixelation",
     ),
 }

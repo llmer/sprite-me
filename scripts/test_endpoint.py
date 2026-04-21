@@ -133,9 +133,10 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument(
         "--ipa-weight",
         type=float,
-        default=0.75,
+        default=0.0,
         help="[animatediff] IP-Adapter identity-conditioning weight (0.0-1.0+). "
-             "Higher = tighter hero identity, looser motion. Default 0.75.",
+             "Default 0.0 (disabled) — empirically any IPA weight >= 0.1 "
+             "freezes the motion module. Raise at your own motion risk.",
     )
     p.add_argument(
         "--ipa-end-at",
@@ -150,6 +151,41 @@ def _parse_args() -> argparse.Namespace:
         "--ad-checkpoint",
         default="toonyou_beta6.safetensors",
         help="[animatediff] SD1.5 checkpoint filename under checkpoints/.",
+    )
+    p.add_argument(
+        "--ad-motion-module",
+        default="mm_sd_v15_v2.ckpt",
+        help="[animatediff] Motion module filename under animatediff_models/. "
+             "mm_sd_v15_v2 is the default — empirically produces ~8x more "
+             "inter-frame motion than v3_sd15_mm on this worker.",
+    )
+    p.add_argument(
+        "--ad-loras",
+        default=None,
+        help="[animatediff] Comma-separated LoRA spec: "
+             "name1:model_str:clip_str,name2:model_str:clip_str. "
+             "Empty string disables all LoRAs. Omit to use the builder default.",
+    )
+    p.add_argument(
+        "--pixelate",
+        action="store_true",
+        help="[animatediff] Run each returned frame through the pixelate "
+             "pipeline (downsample -> palette quantize -> nearest-neighbor "
+             "upscale) before writing to disk. Gives the pixel-art look.",
+    )
+    p.add_argument(
+        "--pixel-size",
+        type=int,
+        default=96,
+        help="[animatediff] Target pixel grid for --pixelate. 64 = chunky "
+             "retro, 96 = detailed sprite, 128 = smooth-ish. Default 96.",
+    )
+    p.add_argument(
+        "--palette-size",
+        type=int,
+        default=24,
+        help="[animatediff] Palette quantization count for --pixelate. "
+             "16 = classic NES-era, 24 = SNES-ish, 32 = GBA-ish. Default 24.",
     )
     return p.parse_args()
 
@@ -220,10 +256,26 @@ async def run_animatediff(args: argparse.Namespace, client: RunPodClient) -> lis
         f"| ipa_weight: {args.ipa_weight} | ckpt: {args.ad_checkpoint}"
     )
 
+    # Parse --ad-loras into the workflow's expected list-of-tuples. Empty string
+    # means "no LoRAs"; None means "use the builder's default stack".
+    kwargs: dict = {}
+    if args.ad_loras is not None:
+        if args.ad_loras == "":
+            kwargs["loras"] = ()
+        else:
+            spec = []
+            for entry in args.ad_loras.split(","):
+                parts = entry.strip().split(":")
+                if len(parts) != 3:
+                    raise ValueError(f"Bad --ad-loras entry: {entry!r}")
+                spec.append((parts[0], float(parts[1]), float(parts[2])))
+            kwargs["loras"] = tuple(spec)
+
     workflow = build_animate_workflow_animatediff(
         motion_prompt=args.motion_description,
         reference_image_name="hero.png",
         checkpoint=args.ad_checkpoint,
+        motion_module=args.ad_motion_module,
         ipadapter_weight=args.ipa_weight,
         ipadapter_end_at=args.ipa_end_at,
         width=args.width,
@@ -231,6 +283,7 @@ async def run_animatediff(args: argparse.Namespace, client: RunPodClient) -> lis
         frames=args.frame_count,
         seed=args.seed,
         steps=args.steps,
+        **kwargs,
     )
     t = time.time()
     resp = await client.client.post(
@@ -345,6 +398,18 @@ async def main() -> int:
         print("ERROR: no images returned", file=sys.stderr)
         await client.close()
         return 3
+
+    if args.animatediff and args.pixelate:
+        from sprite_me.processing.palette import pixelate as _pixelate
+        images = [
+            _pixelate(img, target_size=args.pixel_size,
+                      palette_size=args.palette_size, upscale=True)
+            for img in images
+        ]
+        print(
+            f"Pixelated {len(images)} frame(s) -> {args.pixel_size}px, "
+            f"{args.palette_size}-color palette"
+        )
 
     out = _REPO_ROOT / args.out
     multi_frame = (args.animate or args.animatediff) and len(images) > 1
