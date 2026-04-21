@@ -220,6 +220,7 @@ def build_animate_workflow_animatediff(
     motion_module: str = "v3_sd15_mm.ckpt",
     ipadapter_preset: str = "PLUS (high strength)",
     ipadapter_weight: float = 0.75,
+    ipadapter_end_at: float = 1.0,
     negative_prompt: str = (
         "blurry, low quality, watermark, text, photograph, realistic, "
         "extra limbs, deformed, bad anatomy, ugly"
@@ -311,7 +312,7 @@ def build_animate_workflow_animatediff(
                 "weight_type": "linear",
                 "combine_embeds": "concat",
                 "start_at": 0.0,
-                "end_at": 1.0,
+                "end_at": ipadapter_end_at,
                 "embeds_scaling": "V only",
             },
         },
@@ -319,11 +320,18 @@ def build_animate_workflow_animatediff(
             "class_type": "ADE_LoadAnimateDiffModel",
             "inputs": {"model_name": motion_module},
         },
+        # ADE_LoadAnimateDiffModel emits MOTION_MODEL_ADE; ADE_UseEvolvedSampling
+        # wants an M_MODELS bundle. ApplyAnimateDiffModelSimple wraps a single
+        # motion model into the expected shape — required adapter, not optional.
+        "5a": {
+            "class_type": "ADE_ApplyAnimateDiffModelSimple",
+            "inputs": {"motion_model": ["5", 0]},
+        },
         "6": {
             "class_type": "ADE_UseEvolvedSampling",
             "inputs": {
                 "model": ["4", 0],
-                "m_models": ["5", 0],
+                "m_models": ["5a", 0],
                 "beta_schedule": "autoselect",
             },
         },

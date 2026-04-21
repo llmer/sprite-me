@@ -138,6 +138,15 @@ def _parse_args() -> argparse.Namespace:
              "Higher = tighter hero identity, looser motion. Default 0.75.",
     )
     p.add_argument(
+        "--ipa-end-at",
+        type=float,
+        default=1.0,
+        help="[animatediff] Sampling fraction at which to stop applying IP-Adapter "
+             "conditioning (0.0-1.0). Dropping to ~0.6 lets AnimateDiff own the "
+             "final denoising steps, unlocking motion while still anchoring "
+             "identity early. Default 1.0 (full duration).",
+    )
+    p.add_argument(
         "--ad-checkpoint",
         default="toonyou_beta6.safetensors",
         help="[animatediff] SD1.5 checkpoint filename under checkpoints/.",
@@ -216,6 +225,7 @@ async def run_animatediff(args: argparse.Namespace, client: RunPodClient) -> lis
         reference_image_name="hero.png",
         checkpoint=args.ad_checkpoint,
         ipadapter_weight=args.ipa_weight,
+        ipadapter_end_at=args.ipa_end_at,
         width=args.width,
         height=args.height,
         frames=args.frame_count,
