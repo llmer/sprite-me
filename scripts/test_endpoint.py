@@ -84,6 +84,23 @@ def _parse_args() -> argparse.Namespace:
              "strings, one per frame. If omitted, uses --prompt as a single "
              "pose description.",
     )
+    p.add_argument(
+        "--denoise",
+        type=float,
+        default=1.0,
+        help="[animate] Denoise strength 0-1. Default 1.0 (action anims). "
+             "Drop to 0.5-0.6 for idle/breathing loops.",
+    )
+    p.add_argument(
+        "--no-chain",
+        action="store_true",
+        help="[animate] Disable frame chaining (always reference the hero)",
+    )
+    p.add_argument(
+        "--seed-per-frame",
+        action="store_true",
+        help="[animate] Increment seed per frame (more RNG variation)",
+    )
     return p.parse_args()
 
 
@@ -108,6 +125,7 @@ async def _generate_animate_frame(
     seed: int,
     steps: int,
     guidance: float,
+    denoise: float = 0.7,
 ) -> bytes | None:
     """One Kontext frame submission with the hero uploaded."""
     workflow = build_animate_workflow(
@@ -116,6 +134,7 @@ async def _generate_animate_frame(
         seed=seed,
         steps=steps,
         guidance=guidance,
+        denoise=denoise,
     )
     resp = await client.client.post(
         f"{client.base_url}/run",
@@ -153,8 +172,10 @@ async def run_animate(args: argparse.Namespace, client: RunPodClient) -> list[by
             raise ValueError("--pose-prompts must be a JSON list of strings")
     else:
         pose_prompts = [args.prompt]
-    print(f"Frames: {len(pose_prompts)}")
+    chain = not args.no_chain
+    print(f"Frames: {len(pose_prompts)} | denoise: {args.denoise} | chain: {chain} | seed-per-frame: {args.seed_per_frame}")
 
+    current_ref_b64 = hero_b64
     frames: list[bytes] = []
     _preservation = (
         "Keep the exact same character, clothing, armor, weapon, "
@@ -164,14 +185,18 @@ async def run_animate(args: argparse.Namespace, client: RunPodClient) -> list[by
         if "unchanged" not in pp.lower():
             pp = f"{pp.rstrip('. ')}. {_preservation}"
         t = time.time()
-        print(f"  frame {i+1}/{len(pose_prompts)}: {pp[:60]}...")
+        frame_seed = args.seed + i if args.seed_per_frame else args.seed
+        print(f"  frame {i+1}/{len(pose_prompts)}: seed={frame_seed} {pp[:50]}...")
         frame = await _generate_animate_frame(
-            client, pp, hero_b64, seed=args.seed, steps=args.steps, guidance=args.guidance,
+            client, pp, current_ref_b64, seed=frame_seed, steps=args.steps,
+            guidance=args.guidance, denoise=args.denoise,
         )
         if frame is None:
             print(f"    FAILED (skipping)")
             continue
         frames.append(frame)
+        if chain:
+            current_ref_b64 = base64.b64encode(frame).decode()
         print(f"    done in {time.time()-t:.1f}s ({len(frame)} bytes)")
     return frames
 

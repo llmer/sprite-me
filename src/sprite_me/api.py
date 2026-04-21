@@ -53,6 +53,8 @@ class AnimateRequest(BaseModel):
     seed: int | None = None
     steps: int = 20
     guidance: float = 2.5
+    denoise: float = 1.0
+    chain_frames: bool = False
     edge_margin: int = 6
     pixelate: bool = False
     pixel_size: int = 64
@@ -125,6 +127,8 @@ async def api_animate(req: AnimateRequest) -> dict[str, Any]:
         seed=req.seed,
         steps=req.steps,
         guidance=req.guidance,
+        denoise=req.denoise,
+        chain_frames=req.chain_frames,
         edge_margin=req.edge_margin,
         pixelate=req.pixelate,
         pixel_size=req.pixel_size,

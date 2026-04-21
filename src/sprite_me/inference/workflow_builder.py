@@ -107,6 +107,7 @@ def build_animate_workflow(
     seed: int = 0,
     steps: int = 20,
     guidance: float = 2.5,
+    denoise: float = 1.0,
 ) -> dict[str, Any]:
     """Build a FLUX.1 Kontext single-frame animation workflow.
 
@@ -116,39 +117,26 @@ def build_animate_workflow(
     from the reference image via Kontext's ReferenceLatent mechanism — no
     LoRA load needed, no manual style prompting, no pose skeleton.
 
-    Topology mirrored from the canonical nunchaku Kontext example:
-        UNETLoader(flux1-dev-kontext_fp8_scaled)
-            → KSampler.model
-        DualCLIPLoader(clip_l, t5xxl_fp8_e4m3fn_scaled, type=flux)
-            → CLIPTextEncode(pose_prompt) → ReferenceLatent(ref_latent) → FluxGuidance(2.5) → KSampler.positive
-                                            ↑
-        VAELoader(ae.safetensors)
-            → VAEEncode → ref_latent
-                          ↑              → KSampler.latent_image (same latent; denoise=1 but ref conditioning steers sampling)
-            → VAEDecode(final samples)
-        LoadImage(reference_image_name) → FluxKontextImageScale → pixels → VAEEncode
-        CLIPTextEncode → ConditioningZeroOut → KSampler.negative
-        KSampler → VAEDecode → SaveImage
-
     The hero PNG must be uploaded as an "images" entry in the /run payload
     so the runpod handler writes it to /comfyui/input/ before ComfyUI starts
     the workflow.
-
-    KSampler config is FIXED for Kontext: cfg=1, scheduler=simple, denoise=1.
-    Callers parameterize seed, steps (default 20), guidance (default 2.5).
 
     Args:
         pose_prompt: Kontext-style edit instruction. Best form:
             "Change the pose to <new pose>. Keep the exact same character,
              clothing, palette, and art style unchanged."
         reference_image_name: Filename the handler will write the hero to
-            in /comfyui/input/. Default "hero.png" — only change if you're
-            running multiple concurrent animations on the same worker.
-        width, height: Output dimensions. Kontext works best at 1024x1024
-            (FluxKontextImageScale auto-scales the reference to this).
+            in /comfyui/input/.
         seed: KSampler seed. Same seed across frames improves consistency.
-        steps: Sampling steps. 20 is the canonical default for Kontext.
-        guidance: FluxGuidance scale. 2.5 is the nunchaku default; range 1.5-4.0.
+        steps: Sampling steps (default 20).
+        guidance: FluxGuidance scale (default 2.5).
+        denoise: KSampler denoise strength. 1.0 = full denoise from noise
+            (maximum pose change, required for readable action animations).
+            Lower values pull output toward the reference (more stable but
+            less motion). Default 1.0 — chain_frames=True in animate_sprite
+            provides frame-to-frame smoothness via the reference chain
+            rather than via denoise reduction. Override to 0.5-0.7 for
+            idle/breathing animations where only subtle motion is wanted.
     """
     return {
         "1": {
@@ -207,7 +195,7 @@ def build_animate_workflow(
                 "cfg": 1.0,
                 "sampler_name": "euler",
                 "scheduler": "simple",
-                "denoise": 1.0,
+                "denoise": denoise,
                 "model": ["1", 0],
                 "positive": ["9", 0],
                 "negative": ["10", 0],

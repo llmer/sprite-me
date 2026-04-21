@@ -60,6 +60,7 @@ async def _generate_frame(
     seed: int,
     steps: int,
     guidance: float,
+    denoise: float = 0.7,
 ) -> bytes | None:
     """Submit one Kontext frame. Returns PNG bytes or None on error."""
     workflow = build_animate_workflow(
@@ -68,6 +69,7 @@ async def _generate_frame(
         seed=seed,
         steps=steps,
         guidance=guidance,
+        denoise=denoise,
     )
     try:
         resp = await client.client.post(
@@ -101,6 +103,8 @@ async def animate_sprite(
     seed: int | None = None,
     steps: int = 20,
     guidance: float = 2.5,
+    denoise: float = 1.0,
+    chain_frames: bool = False,
     edge_margin: int | None = None,
     pixelate: bool = False,
     pixel_size: int = 64,
@@ -125,6 +129,21 @@ async def animate_sprite(
         seed: Base seed shared across frames (improves consistency).
         steps: Kontext sampling steps (default 20).
         guidance: FluxGuidance scale (default 2.5, Kontext canonical).
+        denoise: KSampler denoise strength (0.0-1.0). Default 1.0 is
+            correct for action animations (walk/run/attack/jump). Drop to
+            0.5-0.7 only for idle/breathing loops where subtle motion is
+            intentional.
+        chain_frames: Experimental, OFF by default. If True, each frame
+            references the previous frame's output instead of the hero.
+            Documented drift mode: FLUX.1 Kontext's iterative editing
+            accumulates VAE round-trip loss across chained calls — colors
+            desaturate, details wash out, file sizes grow monotonically.
+            BFL's Kontext paper measures degradation after ~6 consecutive
+            edits. Enable only for short 2-3 frame sequences where you
+            consciously want inter-frame continuity and accept the drift
+            (e.g. intentional ghost/wash-out effects). For regular sprite
+            animation, leave off — hero-anchored frames are sharper and
+            more consistent.
         edge_margin: Smart-crop margin per frame.
         pixelate, pixel_size, palette_size: Optional retro pixelation
             applied after background removal.
@@ -165,10 +184,15 @@ async def animate_sprite(
 
     hero_b64 = storage.load_b64(source.filename)
     logger.info(
-        "animate_sprite: asset=%s frames=%d seed=%d",
-        asset_id, len(pose_prompts), actual_seed,
+        "animate_sprite: asset=%s frames=%d seed=%d denoise=%.2f chain=%s",
+        asset_id, len(pose_prompts), actual_seed, denoise, chain_frames,
     )
 
+    # The reference image for each frame: always the hero (chain_frames=False)
+    # or the previous frame's output (chain_frames=True). When chaining,
+    # each frame is a small delta from the previous, producing smoother
+    # transitions at the cost of potential character drift over many frames.
+    current_ref_b64 = hero_b64
     raw_frames: list[bytes] = []
     for i, raw_pose in enumerate(pose_prompts):
         pose = _apply_suffix(raw_pose)
@@ -176,15 +200,18 @@ async def animate_sprite(
         frame_bytes = await _generate_frame(
             client=runpod,
             pose_prompt=pose,
-            hero_b64=hero_b64,
+            hero_b64=current_ref_b64,
             seed=actual_seed,
             steps=steps,
             guidance=guidance,
+            denoise=denoise,
         )
         if frame_bytes is None:
             logger.warning("Skipping failed frame %d", i)
             continue
         raw_frames.append(frame_bytes)
+        if chain_frames:
+            current_ref_b64 = base64.b64encode(frame_bytes).decode()
 
     if not raw_frames:
         return {"error": "All frames failed to generate"}

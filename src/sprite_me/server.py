@@ -145,6 +145,8 @@ async def animate_sprite(
     seed: int | None = None,
     steps: int = 20,
     guidance: float = 2.5,
+    denoise: float = 1.0,
+    chain_frames: bool = False,
     edge_margin: int = 6,
     pixelate: bool = False,
     pixel_size: int = 64,
@@ -167,6 +169,17 @@ async def animate_sprite(
         seed: Base seed shared across frames (improves consistency).
         steps: Kontext sampling steps (20 is canonical default).
         guidance: FluxGuidance scale (2.5 is Kontext default).
+        denoise: Pose-change magnitude per frame (0.0-1.0). Default 1.0
+            is correct for action animations (walk, run, attack, jump).
+            Drop to 0.5-0.6 only for idle/breathing loops where subtle
+            motion is wanted.
+        chain_frames: Experimental, off by default. Chains each frame's
+            reference to the previous output instead of the hero. Causes
+            cumulative VAE drift — colors desaturate, details wash out
+            — because Kontext was designed for single-frame edits, not
+            iterative sequences. Enable only for short 2-3 frame
+            sequences where you consciously accept the drift. Leave off
+            for normal sprite animation.
         edge_margin: Smart-crop margin per frame.
         pixelate: If true, apply retro pixelation to each frame.
         pixel_size: Target pixel resolution when pixelate=True.
@@ -182,6 +195,8 @@ async def animate_sprite(
         seed=seed,
         steps=steps,
         guidance=guidance,
+        denoise=denoise,
+        chain_frames=chain_frames,
         edge_margin=edge_margin,
         pixelate=pixelate,
         pixel_size=pixel_size,

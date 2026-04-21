@@ -144,7 +144,7 @@ def test_animate_workflow_ksampler_kontext_defaults():
     ksampler = next(v for v in nodes.values() if v.get("class_type") == "KSampler")
     assert ksampler["inputs"]["cfg"] == 1.0
     assert ksampler["inputs"]["scheduler"] == "simple"
-    assert ksampler["inputs"]["denoise"] == 1.0
+    assert ksampler["inputs"]["denoise"] == 1.0  # default 1.0 — chain_frames provides smoothness, denoise provides motion
     assert ksampler["inputs"]["seed"] == 42
     assert ksampler["inputs"]["steps"] == 20
 

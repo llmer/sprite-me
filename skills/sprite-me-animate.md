@@ -32,6 +32,27 @@ The tool automatically appends a character-preservation clause ("Keep the exact 
 
 **If you pass the old `animation="walk"` or `custom_prompt="..."` params, the tool will error out with a clear message pointing back at this skill file.** Those are gone.
 
+## Kontext is a single-frame edit model, not a video model
+
+Important context for setting user expectations: **FLUX.1 Kontext was designed for single-frame instruction-based edits**, not sequential animation. BFL's own paper documents that iterative chained edits accumulate visual artifacts after ~6 consecutive calls. The animation industry standard for temporal coherence is AnimateDiff, CogVideoX, or WAN 2.2 — none of which sprite-me currently runs.
+
+What sprite-me's `animate_sprite` actually produces: **independent keyframes** of the same character in different poses, assembled into a sprite sheet. Each frame is a separate Kontext call with the hero as the reference image. The result is more like a traditional 2D game animator drawing key poses than like generated video.
+
+Practical consequences:
+- You get keyframes, not smooth tweening. Between-frame transitions are abrupt (like old-school 6-8fps sprite animation, not 60fps broadcast animation).
+- For a game loop, you'll want to play the sprite sheet at ~8-12fps in your engine to match how Kontext's keyframes read best.
+- If the user wants *actual smooth motion*, tell them: "Kontext produces keyframes; for smooth tweening you'd pipe these through a dedicated video/interpolation model."
+
+## Knobs that actually matter
+
+**Just two, and almost always leave them at defaults.**
+
+`denoise` — default `1.0`. This controls pose-change magnitude per frame. Keep at 1.0 for all action animations (walk, run, attack, jump, cast). Drop to `0.5-0.7` only for idle/breathing loops where subtle variation is intentional.
+
+`chain_frames` — default `False`. Leave off. When enabled, each frame uses the previous output as Kontext's reference instead of the original hero. Sounds good in theory (smoother transitions) but in practice causes **cumulative VAE round-trip drift** — colors desaturate, details wash out, file sizes grow monotonically across the sequence. BFL's paper measures this and says chained edits degrade after ~6 calls. Enable only for deliberately washed-out / ghost / echo effects on 2-3 frames.
+
+Every other parameter — `seed`, `steps`, `guidance`, `edge_margin` — has defaults tuned for Kontext's canonical single-frame config and should generally be left alone.
+
 ## Step 1: Read the hero before animating
 
 Before composing pose prompts, call `get_asset(hero_id)` and inspect:
@@ -161,6 +182,22 @@ It's okay — and better — to refuse an animation request than to waste ~5 min
 - **Inanimate object asked for complex motion**: chest asked for an attack animation.
 
 Give the user a constructive alternative. *"That chibi slime doesn't have legs to walk with. I can do an idle bounce/pulse animation instead, or generate a new hero with visible legs for the walk cycle. Which would you like?"*
+
+## Hard cases: simple/amorphous subjects
+
+**Slimes, blobs, balls, and any subject that's mostly one solid color animate poorly.** This is a documented Kontext weakness, not a skill issue. Kontext's reference-latent mechanism needs high-frequency detail to anchor edits to — faces, outlines, pattern edges, textural variation. A smooth pink sphere with a simple face has almost no high-frequency signal, so Kontext can't reliably perform the shape deformations you ask for. Frames come back nearly identical regardless of knob settings.
+
+Empirically from sprite-me's own tests: a pink chibi slime at `denoise=0.6, 0.85, 1.0` all produced nearly-identical frames. The pose prompt was ignored because the reference image didn't give Kontext enough signal to anchor a transformation.
+
+**What to do instead**:
+
+1. **Set user expectations upfront**: *"Kontext struggles to animate simple shapes like slimes. I can try an idle pulse but it'll be subtle — don't expect dramatic squash-and-stretch."*
+2. **Generate variations with `generate_sprite` instead**: call `generate_sprite` several times with slightly different prompts (*"pink slime, slightly squished at base"* vs *"pink slime, tall and narrow"*) and treat the results as independent keyframes. This sidesteps Kontext entirely for the amorphous case.
+3. **Add visual detail to the hero first**: a slime with a face, stripes, eye highlights, or a texture gives Kontext more to anchor to. Users can regenerate the hero with a more detailed prompt before animating.
+
+Do NOT try to coax more motion by tuning denoise or enabling chain_frames — the problem is input signal, not sampling strength. Higher denoise just adds noise; chain_frames just adds drift on top.
+
+(Reference: FLUX.1 Kontext paper, arxiv 2506.15742, discusses identity preservation limits; community prompting guides note low-detail subjects produce inconsistent edits.)
 
 ## Frame count heuristics
 
